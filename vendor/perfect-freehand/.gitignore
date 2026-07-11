@@ -1,0 +1,21 @@
+node_modules/
+build/
+lib/
+dist/
+docs/
+.idea/*
+
+.DS_Store
+coverage
+*.log
+
+.vercel
+
+# lazyrepo
+.lazy
+
+# TypeScript build cache
+*.tsbuildinfo
+
+# Yarn
+.yarn/install-state.gz

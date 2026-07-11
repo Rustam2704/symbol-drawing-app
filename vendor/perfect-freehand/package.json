@@ -1,0 +1,69 @@
+{
+  "private": true,
+  "version": "1.1.0",
+  "name": "perfect-freehand-repo",
+  "packageManager": "yarn@4.12.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "author": {
+    "name": "Steve Ruiz",
+    "url": "https://twitter.com/steveruizok"
+  },
+  "repository": "https://github.com/steveruizok/perfect-freehand",
+  "keywords": [
+    "ink",
+    "draw",
+    "paint",
+    "signature",
+    "handwriting",
+    "text",
+    "drawing",
+    "painting"
+  ],
+  "license": "MIT",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "bench": "vitest bench",
+    "dev": "lazy run start",
+    "start": "lazy run start",
+    "build": "yarn build:packages && cd packages/dev && yarn build",
+    "build:packages": "node build.mjs && cd packages/perfect-freehand && yarn build",
+    "publish:patch": "yarn build:packages && npm publish ./packages/perfect-freehand",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx,mjs,cjs}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml,css,html}": [
+      "prettier --write"
+    ]
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.7.0",
+    "@commitlint/config-conventional": "^19.7.0",
+    "@eslint/js": "^9.19.0",
+    "@testing-library/jest-dom": "^6.6.0",
+    "@testing-library/react": "^16.0.0",
+    "@types/node": "^20.11.0",
+    "eslint": "^9.19.0",
+    "eslint-config-prettier": "^10.0.1",
+    "husky": "^9.1.0",
+    "jsdom": "^26.0.0",
+    "lazyrepo": "0.0.0-alpha.27",
+    "lint-staged": "^15.4.0",
+    "prettier": "^3.4.0",
+    "typedoc": "^0.28.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.23.0",
+    "vitest": "^3.0.0"
+  }
+}
