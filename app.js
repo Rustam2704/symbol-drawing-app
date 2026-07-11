@@ -4,8 +4,16 @@ const appShell = document.querySelector(".app-shell");
 const canvas = document.querySelector("#practiceCanvas");
 const context = canvas.getContext("2d");
 const clearButton = document.querySelector("#clearButton");
+const gauntletCanvas = document.querySelector("#gauntletAnimation");
+const gauntletContext = gauntletCanvas.getContext("2d");
 const undoButton = document.querySelector("#undoButton");
+const timeGauntletCanvas = document.querySelector("#timeGauntletAnimation");
+const timeGauntletContext = timeGauntletCanvas.getContext("2d");
 const swapMenuButton = document.querySelector("#swapMenuButton");
+const currentThemeButton = document.querySelector("#currentThemeButton");
+const darkThemeButton = document.querySelector("#darkThemeButton");
+const violetThemeButton = document.querySelector("#violetThemeButton");
+const sunsetThemeButton = document.querySelector("#sunsetThemeButton");
 const chooseFileButton = document.querySelector("#chooseFileButton");
 const penSizeInput = document.querySelector("#penSize");
 const backgroundOpacityInput = document.querySelector("#backgroundOpacity");
@@ -42,6 +50,119 @@ const pressureModeButton = document.querySelector("#pressureModeButton");
 const colorSwatches = Array.from(document.querySelectorAll(".color-swatch[data-color-index]"));
 const colorPickerButton = document.querySelector("#colorPickerButton");
 const colorPickerInput = document.querySelector("#colorPickerInput");
+const rangeInputs = Array.from(document.querySelectorAll('input[type="range"]'));
+
+const GAUNTLET_FRAME_SIZE = 80;
+const GAUNTLET_FRAME_COUNT = 48;
+const GAUNTLET_FRAME_DURATION = 10;
+const EFFECT_AUDIO_RATE = 5;
+const gauntletSprite = new Image();
+const timeGauntletSprite = new Image();
+let gauntletAnimationTimer = null;
+let timeGauntletAnimationTimer = null;
+let gauntletAnimationPending = false;
+let timeGauntletAnimationPending = false;
+const activeEffectSounds = new Set();
+
+function drawSpriteFrame(sprite, targetContext, frame) {
+  targetContext.clearRect(0, 0, GAUNTLET_FRAME_SIZE, GAUNTLET_FRAME_SIZE);
+  targetContext.drawImage(
+    sprite,
+    frame * GAUNTLET_FRAME_SIZE,
+    0,
+    GAUNTLET_FRAME_SIZE,
+    GAUNTLET_FRAME_SIZE,
+    0,
+    0,
+    GAUNTLET_FRAME_SIZE,
+    GAUNTLET_FRAME_SIZE,
+  );
+}
+
+function playGauntletAnimation() {
+  if (!gauntletSprite.complete || !gauntletSprite.naturalWidth) {
+    gauntletAnimationPending = true;
+    return;
+  }
+
+  gauntletAnimationPending = false;
+  if (gauntletAnimationTimer !== null) {
+    clearInterval(gauntletAnimationTimer);
+  }
+
+  let frame = 0;
+  drawSpriteFrame(gauntletSprite, gauntletContext, frame);
+  gauntletAnimationTimer = setInterval(() => {
+    frame += 1;
+    if (frame >= GAUNTLET_FRAME_COUNT) {
+      clearInterval(gauntletAnimationTimer);
+      gauntletAnimationTimer = null;
+      drawSpriteFrame(gauntletSprite, gauntletContext, 0);
+      return;
+    }
+    drawSpriteFrame(gauntletSprite, gauntletContext, frame);
+  }, GAUNTLET_FRAME_DURATION);
+}
+
+function playTimeGauntletAnimation() {
+  if (!timeGauntletSprite.complete || !timeGauntletSprite.naturalWidth) {
+    timeGauntletAnimationPending = true;
+    return;
+  }
+
+  timeGauntletAnimationPending = false;
+  if (timeGauntletAnimationTimer !== null) {
+    clearInterval(timeGauntletAnimationTimer);
+  }
+
+  let frame = 0;
+  drawSpriteFrame(timeGauntletSprite, timeGauntletContext, frame);
+  timeGauntletAnimationTimer = setInterval(() => {
+    frame += 1;
+    if (frame >= GAUNTLET_FRAME_COUNT) {
+      clearInterval(timeGauntletAnimationTimer);
+      timeGauntletAnimationTimer = null;
+      drawSpriteFrame(timeGauntletSprite, timeGauntletContext, 0);
+      return;
+    }
+    drawSpriteFrame(timeGauntletSprite, timeGauntletContext, frame);
+  }, GAUNTLET_FRAME_DURATION);
+}
+
+function playEffectSound(source) {
+  const sound = new Audio(source);
+  sound.preload = "auto";
+  sound.playbackRate = EFFECT_AUDIO_RATE;
+  sound.preservesPitch = false;
+  sound.webkitPreservesPitch = false;
+  activeEffectSounds.add(sound);
+  const release = () => activeEffectSounds.delete(sound);
+  sound.addEventListener("ended", release, { once: true });
+  sound.addEventListener("error", release, { once: true });
+  sound.play().catch(release);
+}
+
+function playDeleteSounds() {
+  const dustVariant = Math.floor(Math.random() * 6) + 1;
+  playEffectSound("./assets/thanos_snap_sound.mp3");
+  playEffectSound(`./assets/thanos_dust_${dustVariant}.mp3`);
+}
+
+gauntletSprite.addEventListener("load", () => {
+  drawSpriteFrame(gauntletSprite, gauntletContext, 0);
+  if (gauntletAnimationPending) {
+    playGauntletAnimation();
+  }
+});
+gauntletSprite.src = "./assets/thanos_snap.png";
+
+timeGauntletSprite.addEventListener("load", () => {
+  drawSpriteFrame(timeGauntletSprite, timeGauntletContext, 0);
+  if (timeGauntletAnimationPending) {
+    playTimeGauntletAnimation();
+  }
+});
+timeGauntletSprite.src = "./assets/thanos_time.png";
 
 function readSavedBoolean(key) {
   try {
@@ -58,6 +179,46 @@ function saveBoolean(key, value) {
     // Layout preference is nice to keep, but drawing should continue without storage.
   }
 }
+
+function readSavedTheme() {
+  try {
+    const savedTheme = localStorage.getItem("symbolPracticeTheme");
+    return ["current", "dark", "violet", "sunset"].includes(savedTheme) ? savedTheme : "current";
+  } catch {
+    return "current";
+  }
+}
+
+const THEME_COLORS = {
+  current: {
+    paper: "#fbfaf7",
+    grid: "rgba(73, 68, 60, 0.16)",
+    guide: "rgba(35, 124, 107, 0.24)",
+    margin: "rgba(179, 52, 45, 0.18)",
+    pens: ["#1f1d1a", "#237c6b", "#b3342d"],
+  },
+  dark: {
+    paper: "#070707",
+    grid: "rgba(77, 77, 77, 0.28)",
+    guide: "rgba(77, 77, 77, 0.4)",
+    margin: "rgba(26, 26, 26, 0.65)",
+    pens: ["#b3b3b3", "#4d4d4d", "#1a1a1a"],
+  },
+  violet: {
+    paper: "#07052f",
+    grid: "rgba(51, 181, 224, 0.18)",
+    guide: "rgba(16, 192, 224, 0.4)",
+    margin: "rgba(145, 43, 145, 0.4)",
+    pens: ["#b8f4f2", "#10c0e0", "#922b91"],
+  },
+  sunset: {
+    paper: "#062c3c",
+    grid: "rgba(45, 139, 157, 0.22)",
+    guide: "rgba(78, 190, 188, 0.42)",
+    margin: "rgba(244, 132, 112, 0.42)",
+    pens: ["#ffe0aa", "#4ebebc", "#f48470"],
+  },
+};
 
 const state = {
   drawing: false,
@@ -88,8 +249,104 @@ const state = {
   cropRevisions: new Map(),
   penColor: "#1f1d1a",
   recentColors: ["#1f1d1a", "#237c6b", "#b3342d"],
+  theme: readSavedTheme(),
   menusSwapped: readSavedBoolean("symbolPracticeMenusSwapped"),
+  deleteEffects: [],
+  deleteAnimationFrame: null,
 };
+
+const HISTORY_ACTION_LIMIT = 100;
+let nextHistoryId = 1;
+
+function cloneStrokes(strokes) {
+  return strokes.map((stroke) => ({
+    ...stroke,
+    points: stroke.points.map((point) => ({ ...point })),
+  }));
+}
+
+const historyRoot = {
+  id: 0,
+  kind: "root",
+  strokes: [],
+  parent: null,
+  children: [],
+};
+let currentHistoryNode = historyRoot;
+const historyNodes = new Map([[historyRoot.id, historyRoot]]);
+const historyOrder = [historyRoot];
+
+function removeHistoryLeaf(node) {
+  if (node.parent) {
+    node.parent.children = node.parent.children.filter((child) => child !== node);
+  }
+  historyNodes.delete(node.id);
+  const orderIndex = historyOrder.indexOf(node);
+  if (orderIndex !== -1) {
+    historyOrder.splice(orderIndex, 1);
+  }
+}
+
+function trimHistoryTree() {
+  const protectedPath = [];
+  let pathNode = currentHistoryNode;
+  while (pathNode) {
+    protectedPath.push(pathNode);
+    pathNode = pathNode.parent;
+  }
+  const protectedNodes = new Set(protectedPath.slice(0, HISTORY_ACTION_LIMIT + 1));
+
+  while (historyNodes.size > HISTORY_ACTION_LIMIT + 1) {
+    const removableLeaf = historyOrder.find(
+      (node) => node !== historyRoot && !protectedNodes.has(node) && node.children.length === 0,
+    );
+    if (!removableLeaf) {
+      break;
+    }
+    removeHistoryLeaf(removableLeaf);
+  }
+
+  if (historyNodes.size <= HISTORY_ACTION_LIMIT + 1 || protectedPath.length <= HISTORY_ACTION_LIMIT + 1) {
+    return;
+  }
+
+  const newRoot = protectedPath[HISTORY_ACTION_LIMIT];
+  newRoot.parent = null;
+  const reachable = new Set();
+  const stack = [newRoot];
+  while (stack.length) {
+    const node = stack.pop();
+    if (reachable.has(node)) {
+      continue;
+    }
+    reachable.add(node);
+    stack.push(...node.children);
+  }
+  for (const node of [...historyOrder]) {
+    if (!reachable.has(node)) {
+      historyNodes.delete(node.id);
+      historyOrder.splice(historyOrder.indexOf(node), 1);
+    }
+  }
+}
+
+function recordHistory(kind) {
+  const node = {
+    id: nextHistoryId,
+    kind,
+    strokes: cloneStrokes(state.strokes),
+    parent: currentHistoryNode,
+    children: [],
+  };
+  nextHistoryId += 1;
+  currentHistoryNode.children.push(node);
+  currentHistoryNode = node;
+  historyNodes.set(node.id, node);
+  historyOrder.push(node);
+  trimHistoryTree();
+  updateUndoButton();
+  return node;
+}
 
 const FILE_CROP_PADDING = 40;
 const nameCollator =
@@ -159,7 +416,8 @@ function clearCanvas() {
 }
 
 function drawPaper() {
-  context.fillStyle = "#fbfaf7";
+  const themeColors = THEME_COLORS[state.theme];
+  context.fillStyle = themeColors.paper;
   context.fillRect(0, 0, canvas.width, canvas.height);
 }
 
@@ -168,13 +426,14 @@ function drawGrid() {
     return;
   }
 
+  const themeColors = THEME_COLORS[state.theme];
   const shortSide = Math.min(canvas.width, canvas.height);
   const step = Math.max(36, Math.floor(shortSide / 8));
   const centerX = canvas.width / 2;
   const centerY = canvas.height / 2;
 
   context.save();
-  context.strokeStyle = "rgba(73, 68, 60, 0.16)";
+  context.strokeStyle = themeColors.grid;
   context.lineWidth = 1;
 
   for (let x = centerX % step; x < canvas.width; x += step) {
@@ -185,11 +444,11 @@ function drawGrid() {
     line(0, y, canvas.width, y);
   }
 
-  context.strokeStyle = "rgba(35, 124, 107, 0.24)";
+  context.strokeStyle = themeColors.guide;
   line(centerX, 0, centerX, canvas.height);
   line(0, centerY, canvas.width, centerY);
 
-  context.strokeStyle = "rgba(179, 52, 45, 0.18)";
+  context.strokeStyle = themeColors.margin;
   line(0, 0, canvas.width, canvas.height);
   line(canvas.width, 0, 0, canvas.height);
   context.restore();
@@ -330,14 +589,202 @@ function drawScene() {
   drawStrokes();
 }
 
+function createDeleteParticles(snapshot, background) {
+  const snapshotPixels = snapshot.getContext("2d", { willReadFrequently: true }).getImageData(
+    0,
+    0,
+    snapshot.width,
+    snapshot.height,
+  ).data;
+  const backgroundPixels = background.getContext("2d", { willReadFrequently: true }).getImageData(
+    0,
+    0,
+    background.width,
+    background.height,
+  ).data;
+  const pixelRatio = window.devicePixelRatio || 1;
+  const particleSize = Math.max(2, Math.round(pixelRatio * 1.35));
+  const particles = [];
+
+  for (let y = 0; y < snapshot.height; y += particleSize) {
+    for (let x = 0; x < snapshot.width; x += particleSize) {
+      let containsStroke = false;
+      const sampleX = Math.min(snapshot.width - 1, x + Math.floor(particleSize / 2));
+      const sampleY = Math.min(snapshot.height - 1, y + Math.floor(particleSize / 2));
+
+      for (let oy = 0; oy < particleSize && y + oy < snapshot.height && !containsStroke; oy += 1) {
+        for (let ox = 0; ox < particleSize && x + ox < snapshot.width; ox += 1) {
+          const offset = ((y + oy) * snapshot.width + x + ox) * 4;
+          const difference =
+            Math.abs(snapshotPixels[offset] - backgroundPixels[offset]) +
+            Math.abs(snapshotPixels[offset + 1] - backgroundPixels[offset + 1]) +
+            Math.abs(snapshotPixels[offset + 2] - backgroundPixels[offset + 2]) +
+            Math.abs(snapshotPixels[offset + 3] - backgroundPixels[offset + 3]);
+          if (difference > 24) {
+            containsStroke = true;
+            break;
+          }
+        }
+      }
+
+      if (!containsStroke) {
+        continue;
+      }
+
+      const angle = Math.random() * Math.PI * 2;
+      const velocity = (42 + Math.random() * 42) * pixelRatio * 0.2;
+      particles.push({
+        sx: x,
+        sy: y,
+        sampleX,
+        sampleY,
+        x,
+        y,
+        vx: Math.cos(angle) * velocity,
+        vy: Math.sin(angle) * velocity,
+        lifetime: 0.7 + Math.random() * 0.8,
+        size: particleSize,
+      });
+    }
+  }
+
+  return particles;
+}
+
+function drawDeleteEffectFrame(timestamp) {
+  if (!state.deleteEffects.length) {
+    state.deleteAnimationFrame = null;
+    return;
+  }
+
+  drawScene();
+  const activeEffects = [];
+
+  for (const effect of state.deleteEffects) {
+    if (effect.lastTimestamp === null) {
+      effect.lastTimestamp = timestamp;
+    }
+    const deltaTime = Math.min(0.05, (timestamp - effect.lastTimestamp) / 1000);
+    effect.lastTimestamp = timestamp;
+    effect.phase += deltaTime * 2.2;
+    let hasVisibleParticles = false;
+
+    for (const particle of effect.particles) {
+      const horizontalFraction = particle.sampleX / Math.max(1, canvas.width);
+      const activationDelay = horizontalFraction * 0.8;
+      const isActive = effect.phase >= activationDelay;
+
+      if (isActive) {
+        particle.x += particle.vx * deltaTime * 2;
+        particle.y += particle.vy * deltaTime * 2;
+        particle.vy -= 54 * (window.devicePixelRatio || 1) * deltaTime * 2;
+        particle.lifetime = Math.max(0, particle.lifetime - deltaTime * 2);
+      }
+
+      const alpha = isActive ? Math.min(1, particle.lifetime / 0.3) : 1;
+      if (alpha <= 0) {
+        continue;
+      }
+      hasVisibleParticles = true;
+      context.globalAlpha = alpha;
+      context.drawImage(
+        effect.snapshot,
+        particle.sx,
+        particle.sy,
+        particle.size,
+        particle.size,
+        particle.x,
+        particle.y,
+        particle.size,
+        particle.size,
+      );
+    }
+
+    if (hasVisibleParticles && effect.phase < 4) {
+      activeEffects.push(effect);
+    }
+  }
+  context.globalAlpha = 1;
+  state.deleteEffects = activeEffects;
+
+  if (state.deleteEffects.length) {
+    state.deleteAnimationFrame = requestAnimationFrame(drawDeleteEffectFrame);
+  } else {
+    state.deleteAnimationFrame = null;
+    drawScene();
+  }
+}
+
+function deleteAllStrokes() {
+  if (!state.strokes.length) {
+    return;
+  }
+
+  playGauntletAnimation();
+  playDeleteSounds();
+
+  if (state.drawing) {
+    state.drawing = false;
+    state.activeStroke = null;
+    state.lastPoint = null;
+    recordHistory("draw");
+  }
+
+  // Redraw without active dust so older disintegrations never become part of this snapshot.
+  drawScene();
+  const snapshot = document.createElement("canvas");
+  snapshot.width = canvas.width;
+  snapshot.height = canvas.height;
+  snapshot.getContext("2d").drawImage(canvas, 0, 0);
+
+  state.strokes = [];
+  const deleteHistoryNode = recordHistory("delete");
+  drawScene();
+
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    updateUndoButton();
+    return;
+  }
+
+  const background = document.createElement("canvas");
+  background.width = canvas.width;
+  background.height = canvas.height;
+  background.getContext("2d").drawImage(canvas, 0, 0);
+  const particles = createDeleteParticles(snapshot, background);
+  updateUndoButton();
+
+  if (!particles.length) {
+    return;
+  }
+
+  state.deleteEffects.push({
+    historyId: deleteHistoryNode.id,
+    snapshot,
+    particles,
+    phase: 0,
+    lastTimestamp: null,
+  });
+  if (state.deleteAnimationFrame === null) {
+    state.deleteAnimationFrame = requestAnimationFrame(drawDeleteEffectFrame);
+  }
+}
+
 function updateUndoButton() {
-  undoButton.disabled = state.strokes.length === 0;
+  undoButton.disabled = currentHistoryNode.parent === null;
 }
 
 function updateRangeValues() {
   penSizeValue.textContent = `${state.penSize.toFixed(1)} px`;
   backgroundOpacityValue.textContent = `${(state.backgroundTransparency * 100).toFixed(1)}%`;
   backgroundScaleValue.textContent = `${state.backgroundScale.toFixed(1)}x`;
+}
+
+function updateRangeFill(input) {
+  const min = Number(input.min) || 0;
+  const max = Number(input.max) || 100;
+  const value = Number(input.value);
+  const percent = max === min ? 0 : ((value - min) / (max - min)) * 100;
+  input.style.setProperty("--range-progress", `${Math.max(0, Math.min(100, percent))}%`);
 }
 
 function normalizeColor(color) {
@@ -380,6 +827,30 @@ function updateMenuSwap() {
   swapMenuButton.setAttribute("aria-pressed", String(state.menusSwapped));
 }
 
+function setTheme(theme, { updatePen = true } = {}) {
+  state.theme = THEME_COLORS[theme] ? theme : "current";
+  document.documentElement.dataset.theme = state.theme;
+  [[currentThemeButton, "current"], [darkThemeButton, "dark"], [violetThemeButton, "violet"], [sunsetThemeButton, "sunset"]]
+    .forEach(([button, buttonTheme]) => {
+      const isActive = state.theme === buttonTheme;
+      button.classList.toggle("active", isActive);
+      button.setAttribute("aria-pressed", String(isActive));
+    });
+
+  try {
+    localStorage.setItem("symbolPracticeTheme", state.theme);
+  } catch {
+    // Theme persistence is optional.
+  }
+
+  if (updatePen) {
+    const colors = THEME_COLORS[state.theme].pens;
+    state.recentColors = colors;
+    setPenColor(colors[0]);
+  }
+  drawScene();
+}
+
 function setToolMode(mode) {
   state.toolMode = mode;
   pointerModeButton.classList.toggle("active", mode === "pointer");
@@ -395,13 +866,17 @@ function setToolMode(mode) {
 
 function updateCanvasCursor(isPanning) {
   if (state.toolMode === "hand") {
-    canvas.style.cursor = isPanning ? "grabbing" : "grab";
+    canvas.style.cursor = "url('./assets/hand-cursor.svg') 16 19, grab";
     return;
   }
 
-  if (state.toolMode === "brush" || state.toolMode === "pressure") {
-    canvas.style.cursor =
-      "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cpath d='M8 26c3 .5 5.4-.3 7-1.9 1.2-1.2 1-3-.2-4.1s-2.8-1.1-4 0C9.1 21.7 8.4 23.6 8 26Z' fill='white' stroke='black' stroke-width='2'/%3E%3Cpath d='M14 20 27 7a3 3 0 0 0-4-4L10 16' fill='none' stroke='black' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E\") 8 26, crosshair";
+  if (state.toolMode === "pressure") {
+    canvas.style.cursor = "url('./assets/stylus-cursor.svg') 2 2, crosshair";
+    return;
+  }
+
+  if (state.toolMode === "brush") {
+    canvas.style.cursor = "url('./assets/calligraphy-brush-cursor.svg') 5 3, crosshair";
     return;
   }
 
@@ -527,11 +1002,17 @@ function setLibraryMode(mode) {
 }
 
 function undoLastStroke() {
-  if (!state.strokes.length) {
+  if (!currentHistoryNode.parent) {
     return;
   }
 
-  state.strokes.pop();
+  playTimeGauntletAnimation();
+  playEffectSound("./assets/thanos_reverse_sound.mp3");
+  if (currentHistoryNode.kind === "delete") {
+    state.deleteEffects = state.deleteEffects.filter((effect) => effect.historyId !== currentHistoryNode.id);
+  }
+  currentHistoryNode = currentHistoryNode.parent;
+  state.strokes = cloneStrokes(currentHistoryNode.strokes);
   drawScene();
   updateUndoButton();
 }
@@ -609,6 +1090,7 @@ function stopDrawing(event) {
   state.drawing = false;
   state.lastPoint = null;
   state.activeStroke = null;
+  recordHistory("draw");
 
   if (canvas.hasPointerCapture(event.pointerId)) {
     canvas.releasePointerCapture(event.pointerId);
@@ -1524,10 +2006,14 @@ async function loadLibrary(folder = state.libraryFolder) {
   renderLibrary();
 }
 
-clearButton.addEventListener("click", () => {
-  state.strokes = [];
-  drawScene();
-  updateUndoButton();
+clearButton.addEventListener("click", deleteAllStrokes);
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Delete" || event.repeat) {
+    return;
+  }
+  event.preventDefault();
+  deleteAllStrokes();
 });
 
 undoButton.addEventListener("click", undoLastStroke);
@@ -1537,6 +2023,16 @@ swapMenuButton.addEventListener("click", () => {
   saveBoolean("symbolPracticeMenusSwapped", state.menusSwapped);
   updateMenuSwap();
   fitCanvasToContainer();
+});
+
+currentThemeButton.addEventListener("click", () => setTheme("current"));
+darkThemeButton.addEventListener("click", () => setTheme("dark"));
+violetThemeButton.addEventListener("click", () => setTheme("violet"));
+sunsetThemeButton.addEventListener("click", () => setTheme("sunset"));
+
+rangeInputs.forEach((input) => {
+  input.addEventListener("input", () => updateRangeFill(input));
+  updateRangeFill(input);
 });
 
 colorSwatches.forEach((button) => {
@@ -1778,6 +2274,7 @@ window.addEventListener("keydown", (event) => {
   }
 });
 
+setTheme(state.theme, { updatePen: state.theme !== "current" });
 updateMenuSwap();
 fitCanvasToContainer();
 updateUndoButton();

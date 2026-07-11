@@ -120,6 +120,13 @@ input {
   fill: none;
 }
 
+.gauntlet-animation {
+  display: block;
+  width: 80px;
+  height: 80px;
+  pointer-events: none;
+}
+
 .undo-button {
   background: var(--accent);
   box-shadow: 0 10px 20px rgba(35, 124, 107, 0.2);
@@ -191,6 +198,48 @@ input {
   cursor: pointer;
   font-size: 13px;
   font-weight: 720;
+}
+
+.theme-switcher {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  width: 104px;
+  margin-top: auto;
+}
+
+.theme-button {
+  height: 34px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  box-shadow: 0 6px 14px rgba(29, 32, 36, 0.13);
+}
+
+.theme-button-current {
+  background: linear-gradient(135deg, #fbfaf7 0 34%, #237c6b 34% 67%, #b7ddd4 67%);
+}
+
+.theme-button-dark {
+  background: linear-gradient(135deg, #070707 0 34%, #1a1a1a 34% 67%, #4d4d4d 67%);
+}
+
+.theme-button-violet {
+  background: linear-gradient(135deg, #07052f 0 28%, #922b91 28% 52%, #167db5 52% 76%, #10c0e0 76%);
+}
+
+.theme-button-sunset {
+  background: linear-gradient(135deg, #062c3c 0 28%, #126c83 28% 52%, #4ebebc 52% 76%, #f48470 76%);
+}
+
+.theme-button.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.theme-switcher + .swap-menu-button {
+  margin-top: 0;
 }
 
 .swap-menu-button:hover {
@@ -541,8 +590,8 @@ input[type="range"] {
 }
 
 .mode-button svg {
-  width: 30px;
-  height: 30px;
+  width: 74px;
+  height: 74px;
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
@@ -550,10 +599,38 @@ input[type="range"] {
   stroke-linejoin: round;
 }
 
-.mode-button img {
-  width: 40px;
-  height: 40px;
-  object-fit: contain;
+.mode-button .pointer-mode-icon {
+  width: 72px;
+  height: 72px;
+  stroke-width: 1.55;
+  transform: none;
+}
+
+.pressure-pen-icon {
+  display: block;
+  width: 74px;
+  height: 74px;
+  background: currentColor;
+  mask: url("./assets/stylus-rings-icon.svg") center / 150% 150% no-repeat;
+  -webkit-mask: url("./assets/stylus-rings-icon.svg") center / 150% 150% no-repeat;
+}
+
+.calligraphy-brush-icon {
+  display: block;
+  width: 74px;
+  height: 74px;
+  background: currentColor;
+  mask: url("./assets/japanese-calligraphy-brush.svg") center / contain no-repeat;
+  -webkit-mask: url("./assets/japanese-calligraphy-brush.svg") center / contain no-repeat;
+}
+
+.hand-outline-icon {
+  display: block;
+  width: 74px;
+  height: 74px;
+  background: currentColor;
+  mask: url("./assets/hand-outline.svg") center / contain no-repeat;
+  -webkit-mask: url("./assets/hand-outline.svg") center / contain no-repeat;
 }
 
 @media (max-height: 760px) {
@@ -620,11 +697,57 @@ input[type="range"] {
 
 .icon-button {
   display: grid;
-  width: 36px;
-  height: 36px;
+  position: relative;
+  width: 54px;
+  height: 54px;
+  flex: 0 0 54px;
   place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
   color: #5d574f;
   background: #f2eee7;
+  font-size: 0;
+  font-weight: 500;
+  line-height: 1;
+  transition:
+    color 160ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.icon-button::before,
+.icon-button::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 28px;
+  height: 3px;
+  border-radius: 999px;
+  background: currentColor;
+  content: "";
+}
+
+.icon-button::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.icon-button::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.icon-button:not(:disabled):hover {
+  color: var(--panel);
+  background: var(--ink);
+  border-color: var(--ink);
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--ink) 22%, transparent);
+  transform: scale(1.05);
+  filter: none;
+}
+
+.icon-button:not(:disabled):active {
+  transform: scale(0.97);
 }
 
 #cropCanvas,
@@ -709,9 +832,250 @@ input[type="range"] {
     width: 92px;
   }
 
+  .theme-switcher {
+    width: 92px;
+  }
+
   .library-list {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #808080;
+  --paper: #070707;
+  --panel: #1a1a1a;
+  --line: #4d4d4d;
+  --accent: #4d4d4d;
+  --accent-strong: #808080;
+  --danger: #1a1a1a;
+  --shadow: 0 18px 45px rgba(0, 0, 0, 0.45);
+}
+
+:root[data-theme="dark"] body {
+  background: #070707;
+}
+
+:root[data-theme="dark"] .left-rail,
+:root[data-theme="dark"] .settings-panel {
+  background: rgba(8, 8, 8, 0.96);
+  border-color: #1a1a1a;
+}
+
+:root[data-theme="dark"] .workspace,
+:root[data-theme="dark"] #cropCanvas,
+:root[data-theme="dark"] #fileCropCanvas {
+  border-color: #1a1a1a;
+  background: #0d0d0d;
+}
+
+:root[data-theme="dark"] .panel-header p,
+:root[data-theme="dark"] .control-row label,
+:root[data-theme="dark"] .library-header span,
+:root[data-theme="dark"] .library-name,
+:root[data-theme="dark"] .library-empty {
+  color: #808080;
+}
+
+:root[data-theme="dark"] .secondary-button,
+:root[data-theme="dark"] .icon-small-button,
+:root[data-theme="dark"] .sort-button,
+:root[data-theme="dark"] .swap-menu-button,
+:root[data-theme="dark"] .icon-button {
+  color: #808080;
+  background: #1a1a1a;
+  border-color: #4d4d4d;
+}
+
+:root[data-theme="dark"] .folder-path-input,
+:root[data-theme="dark"] .library-item {
+  color: #808080;
+  background: #101010;
+  border-color: #1a1a1a;
+}
+
+:root[data-theme="dark"] .sort-toggle {
+  background: #1a1a1a;
+}
+
+:root[data-theme="dark"] .library-panel,
+:root[data-theme="dark"] .text-toggle,
+:root[data-theme="dark"] .mode-button,
+:root[data-theme="dark"] .color-swatch {
+  border-color: #4d4d4d;
+}
+
+:root[data-theme="dark"] .tool-button,
+:root[data-theme="dark"] .file-picker,
+:root[data-theme="dark"] .primary-button,
+:root[data-theme="dark"] .text-toggle.active,
+:root[data-theme="dark"] .mode-button.active,
+:root[data-theme="dark"] .sort-button.active,
+:root[data-theme="dark"] .swap-menu-button.active {
+  color: #808080;
+}
+
+:root[data-theme="dark"] .color-picker-button {
+  color: #808080;
+  background:
+    linear-gradient(#1a1a1a, #1a1a1a) padding-box,
+    conic-gradient(#4d4d4d, #808080, #4d4d4d, #1a1a1a, #4d4d4d, #808080) border-box;
+}
+
+:root[data-theme="dark"] input[type="range"] {
+  height: 16px;
+  appearance: none;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    #4d4d4d 0 var(--range-progress),
+    #808080 var(--range-progress) 100%
+  ) center / 100% 6px no-repeat;
+}
+
+:root[data-theme="dark"] input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border: 1px solid #4d4d4d;
+  border-radius: 999px;
+  background: transparent;
+}
+
+:root[data-theme="dark"] input[type="range"]::-webkit-slider-thumb {
+  width: 22px;
+  height: 22px;
+  margin-top: -9px;
+  appearance: none;
+  border: 2px solid #808080;
+  border-radius: 50%;
+  background: #4d4d4d;
+}
+
+:root[data-theme="dark"] input[type="range"]::-moz-range-track {
+  height: 6px;
+  border: 1px solid #4d4d4d;
+  border-radius: 999px;
+  background: transparent;
+}
+
+:root[data-theme="dark"] input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #808080;
+  border-radius: 50%;
+  background: #4d4d4d;
+}
+
+:root[data-theme="dark"] :is(
+  .tool-button,
+  .file-picker,
+  .primary-button,
+  .secondary-button,
+  .icon-button,
+  .icon-small-button,
+  .text-toggle,
+  .mode-button,
+  .sort-button,
+  .swap-menu-button
+):not(:disabled):hover {
+  color: #1a1a1a;
+  background: #808080;
+  border-color: #808080;
+  filter: none;
+}
+
+:root[data-theme="violet"] {
+  color-scheme: dark;
+  --ink: #b8f4f2;
+  --paper: #07052f;
+  --panel: #211052;
+  --line: #44206c;
+  --accent: #922b91;
+  --accent-strong: #10c0e0;
+  --danger: #641d68;
+  --shadow: 0 18px 45px rgba(2, 2, 36, 0.55);
+  --theme-surface: rgba(19, 10, 62, 0.94);
+  --theme-soft: #211052;
+  --theme-border: #44206c;
+}
+
+:root[data-theme="sunset"] {
+  color-scheme: dark;
+  --ink: #d7f3ee;
+  --paper: #062c3c;
+  --panel: #0a4457;
+  --line: #126c83;
+  --accent: #f48470;
+  --accent-strong: #ffe0aa;
+  --danger: #bd5e62;
+  --shadow: 0 18px 45px rgba(1, 27, 39, 0.5);
+  --theme-surface: rgba(5, 48, 65, 0.94);
+  --theme-soft: #0a4457;
+  --theme-border: #126c83;
+}
+
+:root[data-theme="violet"] body {
+  background:
+    radial-gradient(circle at 52% 8%, rgba(16, 192, 224, 0.28), transparent 28%),
+    linear-gradient(150deg, #05042a 0%, #161052 56%, #3b125f 100%);
+}
+
+:root[data-theme="sunset"] body {
+  background:
+    radial-gradient(circle at 50% 12%, rgba(244, 132, 112, 0.24), transparent 26%),
+    linear-gradient(150deg, #041f2d 0%, #0a4d62 58%, #126c83 100%);
+}
+
+:root:is([data-theme="violet"], [data-theme="sunset"]) .left-rail,
+:root:is([data-theme="violet"], [data-theme="sunset"]) .settings-panel {
+  background: var(--theme-surface);
+  border-color: var(--theme-border);
+}
+
+:root:is([data-theme="violet"], [data-theme="sunset"]) .workspace,
+:root:is([data-theme="violet"], [data-theme="sunset"]) #cropCanvas,
+:root:is([data-theme="violet"], [data-theme="sunset"]) #fileCropCanvas {
+  border-color: var(--theme-border);
+  background: var(--paper);
+}
+
+:root:is([data-theme="violet"], [data-theme="sunset"]) .panel-header p,
+:root:is([data-theme="violet"], [data-theme="sunset"]) .control-row label,
+:root:is([data-theme="violet"], [data-theme="sunset"]) .library-header span,
+:root:is([data-theme="violet"], [data-theme="sunset"]) .library-name,
+:root:is([data-theme="violet"], [data-theme="sunset"]) .library-empty {
+  color: var(--ink);
+}
+
+:root:is([data-theme="violet"], [data-theme="sunset"]) .secondary-button,
+:root:is([data-theme="violet"], [data-theme="sunset"]) .icon-small-button,
+:root:is([data-theme="violet"], [data-theme="sunset"]) .sort-button,
+:root:is([data-theme="violet"], [data-theme="sunset"]) .swap-menu-button,
+:root:is([data-theme="violet"], [data-theme="sunset"]) .icon-button,
+:root:is([data-theme="violet"], [data-theme="sunset"]) .sort-toggle {
+  color: var(--ink);
+  background: var(--theme-soft);
+  border-color: var(--theme-border);
+}
+
+:root:is([data-theme="violet"], [data-theme="sunset"]) .folder-path-input,
+:root:is([data-theme="violet"], [data-theme="sunset"]) .library-item {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--theme-soft) 82%, black);
+  border-color: var(--theme-border);
+}
+
+:root:is([data-theme="violet"], [data-theme="sunset"]) .library-panel,
+:root:is([data-theme="violet"], [data-theme="sunset"]) .text-toggle,
+:root:is([data-theme="violet"], [data-theme="sunset"]) .mode-button,
+:root:is([data-theme="violet"], [data-theme="sunset"]) .color-swatch {
+  border-color: var(--theme-border);
+}
+
+:root .icon-button:not(:disabled):hover {
+  color: var(--panel);
+  background: var(--ink);
+  border-color: var(--ink);
 }
 
 @media (max-width: 520px) {
