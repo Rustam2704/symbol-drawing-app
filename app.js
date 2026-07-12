@@ -16,6 +16,7 @@ import {
   previewSquareToImageCrop,
 } from "./modules/crop-geometry.js";
 import { createDeleteMotionMap, packDeleteParticles } from "./modules/delete-particles.js";
+import { createDeleteEffectController } from "./modules/delete-effect-controller.js";
 import { cloneStrokes, createHistory } from "./modules/history.js";
 import {
   canCropSourceItem,
@@ -136,8 +137,6 @@ const state = {
   recentColors: ["#1f1d1a", "#237c6b", "#b3342d"],
   theme: settings.readTheme(),
   menusSwapped: settings.readBoolean("symbolPracticeMenusSwapped"),
-  deleteEffects: [],
-  deleteAnimationFrame: null,
 };
 
 const history = createHistory({ limit: 20 });
@@ -472,118 +471,19 @@ function createDeleteParticles(strokes) {
   return packDeleteParticles(rgba, motionMap);
 }
 
-function startDeleteEffect(deleteHistoryNode, deletedStrokes) {
-  const particles = createDeleteParticles(deletedStrokes);
-  if (!particles.count) {
-    return;
-  }
-
-  const duration = particles.maxDuration;
-  deleteHistoryNode.deleteEffect = {
-    particles,
-    duration,
-  };
-  state.deleteEffects.push({
-    historyId: deleteHistoryNode.id,
-    particles,
-    duration,
-    direction: "forward",
-    elapsed: 0,
-    lastTimestamp: null,
-  });
-}
-
-function drawDeleteParticle(effect, particleIndex, sampleTime) {
-  const particles = effect.particles;
-  const particleDuration = particles.duration[particleIndex];
-  let x = particles.sx[particleIndex];
-  let y = particles.sy[particleIndex];
-  let alpha = 1;
-
-  if (sampleTime > 0) {
-    const clampedTime = Math.min(sampleTime, particleDuration);
-    const simulationTime = clampedTime * 2;
-    const upwardAcceleration = -54 * (window.devicePixelRatio || 1);
-    x += particles.vx[particleIndex] * simulationTime;
-    y += particles.vy[particleIndex] * simulationTime + 0.5 * upwardAcceleration * simulationTime * simulationTime;
-    const remainingLifetime = Math.max(0, particleDuration - clampedTime) * 2;
-    alpha = Math.min(1, remainingLifetime / 0.3);
-  }
-
-  if (alpha <= 0) {
-    return;
-  }
-  context.globalAlpha = alpha;
-  const color = particles.palette[particles.colorIndex[particleIndex]];
-  if (effect.renderColor !== color) {
-    effect.renderColor = color;
-    context.fillStyle = color;
-  }
-  context.fillRect(x, y, particles.size, particles.size);
-}
-
-function ensureDeleteAnimationRunning() {
-  if (state.deleteEffects.length && state.deleteAnimationFrame === null) {
-    state.deleteAnimationFrame = requestAnimationFrame(drawDeleteEffectFrame);
-  }
-}
-
-function settleReassemblyEffects() {
-  const hasReassembly = state.deleteEffects.some((effect) => effect.direction === "reverse");
-  if (!hasReassembly) {
-    return;
-  }
-  state.deleteEffects = state.deleteEffects.filter((effect) => effect.direction !== "reverse");
-  state.strokes = cloneStrokes(history.current.strokes);
-  drawScene();
-}
-
-function drawDeleteEffectFrame(timestamp) {
-  if (!state.deleteEffects.length) {
-    state.deleteAnimationFrame = null;
-    return;
-  }
-
-  drawScene();
-  const activeEffects = [];
-
-  for (const effect of state.deleteEffects) {
-    effect.renderColor = null;
-    if (effect.lastTimestamp === null) {
-      effect.lastTimestamp = timestamp;
-    }
-    const deltaTime = Math.min(0.05, (timestamp - effect.lastTimestamp) / 1000);
-    effect.lastTimestamp = timestamp;
-    effect.elapsed += deltaTime * (effect.direction === "reverse" ? 2 : 1);
-    const runDuration = effect.direction === "reverse" ? effect.reverseFrom : effect.duration;
-    const sampleTime =
-      effect.direction === "reverse"
-        ? Math.max(0, effect.reverseFrom - effect.elapsed)
-        : Math.min(effect.duration, effect.elapsed);
-
-    for (let particleIndex = 0; particleIndex < effect.particles.count; particleIndex += 1) {
-      drawDeleteParticle(effect, particleIndex, sampleTime);
-    }
-
-    if (effect.elapsed < runDuration) {
-      activeEffects.push(effect);
-    } else if (effect.direction === "reverse" && history.current.id === effect.targetHistoryId) {
-      state.strokes = cloneStrokes(effect.restoreStrokes);
-    }
-  }
-  context.globalAlpha = 1;
-  state.deleteEffects = activeEffects;
-
-  if (state.deleteEffects.length) {
-    state.deleteAnimationFrame = requestAnimationFrame(drawDeleteEffectFrame);
-  } else {
-    state.deleteAnimationFrame = null;
-    drawScene();
-  }
-}
+const deleteEffects = createDeleteEffectController({
+  context,
+  cloneStrokes,
+  drawScene,
+  getCurrentHistoryNode: () => history.current,
+  getPixelRatio: () => window.devicePixelRatio || 1,
+  setStrokes: (strokes) => {
+    state.strokes = strokes;
+  },
+});
 
 function deleteAllStrokes() {
-  settleReassemblyEffects();
+  deleteEffects.settleReassembly();
   if (!state.strokes.length) {
     return;
   }
@@ -611,8 +511,7 @@ function deleteAllStrokes() {
   }
 
   updateUndoButton();
-  startDeleteEffect(deleteHistoryNode, deletedStrokes);
-  ensureDeleteAnimationRunning();
+  deleteEffects.start(deleteHistoryNode, createDeleteParticles(deletedStrokes));
 }
 
 function updateUndoButton() {
@@ -783,7 +682,7 @@ function setLibraryMode(mode) {
 }
 
 function undoLastStroke() {
-  settleReassemblyEffects();
+  deleteEffects.settleReassembly();
   if (!history.canUndo) {
     return;
   }
@@ -794,36 +693,12 @@ function undoLastStroke() {
   if (undoneNode.kind === "delete") {
     stopDeleteSounds();
   }
-  const activeForwardEffect = state.deleteEffects.find(
-    (effect) => effect.historyId === undoneNode.id && effect.direction === "forward",
+  const effectHandled = deleteEffects.undo(
+    undoneNode,
+    targetNode,
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   );
-  state.deleteEffects = state.deleteEffects.filter((effect) => effect.historyId !== undoneNode.id);
-  if (
-    undoneNode.kind === "delete" &&
-    undoneNode.deleteEffect &&
-    !window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  ) {
-    const reverseFrom = activeForwardEffect
-      ? Math.min(activeForwardEffect.elapsed, undoneNode.deleteEffect.duration)
-      : undoneNode.deleteEffect.duration;
-    state.strokes = [];
-    if (reverseFrom > 0) {
-      state.deleteEffects.push({
-        historyId: undoneNode.id,
-        particles: undoneNode.deleteEffect.particles,
-        duration: undoneNode.deleteEffect.duration,
-        direction: "reverse",
-        reverseFrom,
-        elapsed: 0,
-        lastTimestamp: null,
-        targetHistoryId: targetNode.id,
-        restoreStrokes: cloneStrokes(targetNode.strokes),
-      });
-      ensureDeleteAnimationRunning();
-    } else {
-      state.strokes = cloneStrokes(targetNode.strokes);
-    }
-  } else {
+  if (!effectHandled) {
     state.strokes = cloneStrokes(targetNode.strokes);
   }
   drawScene();
@@ -831,7 +706,7 @@ function undoLastStroke() {
 }
 
 function startDrawing(event) {
-  settleReassemblyEffects();
+  deleteEffects.settleReassembly();
   event.preventDefault();
   canvas.setPointerCapture(event.pointerId);
 
