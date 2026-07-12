@@ -24,6 +24,7 @@ import {
   sortLibraryItems,
 } from "./modules/library-utils.js";
 import { createLibraryApi } from "./modules/library-api.js";
+import { createMediaLoader } from "./modules/media-loader.js";
 import { createPdfService } from "./modules/pdf-service.js";
 import { createSpriteAnimation } from "./modules/sprite-animation.js";
 
@@ -932,40 +933,14 @@ function stopDrawing(event) {
   }
 }
 
-function imageFromSrc(src) {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.addEventListener("load", () => resolve(image));
-    image.addEventListener("error", () => reject(new Error("Could not load image.")));
-    image.src = src;
-  });
-}
-
-function imageFromCanvas(sourceCanvas) {
-  return imageFromSrc(sourceCanvas.toDataURL("image/png"));
-}
+const mediaLoader = createMediaLoader();
 
 const pdfService = createPdfService({
   pdfLibrary: getPdfLibrary(),
   workerSrc: "./vendor/pdf.worker.min.js",
-  canvasToImage: imageFromCanvas,
+  canvasToImage: mediaLoader.fromCanvas,
 });
 const libraryApi = createLibraryApi({ createUrl: apiUrl });
-
-function readImageFile(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.addEventListener("load", async () => {
-      try {
-        resolve(await imageFromSrc(reader.result));
-      } catch (error) {
-        reject(error);
-      }
-    });
-    reader.addEventListener("error", () => reject(new Error("Could not read image.")));
-    reader.readAsDataURL(file);
-  });
-}
 
 async function loadImage(file) {
   if (!file) {
@@ -988,7 +963,7 @@ async function loadImage(file) {
       state.pdfPageCount = pdfResult.pageCount;
       showPdfPages();
     } else {
-      image = await readImageFile(file);
+      image = await mediaLoader.fromFile(file);
       state.pdfDocument = null;
       state.pdfPage = 1;
       state.pdfPageCount = 0;
@@ -1113,7 +1088,9 @@ async function loadLibraryItem(item) {
     setLibraryMode("folder");
     renderLibrary();
     applyLoadedBackground(
-      item.source === "browser" ? await readImageFile(await browserFiles.getFile(item)) : await imageFromSrc(versionedImageUrl(item)),
+      item.source === "browser"
+        ? await mediaLoader.fromFile(await browserFiles.getFile(item))
+        : await mediaLoader.fromSource(versionedImageUrl(item)),
     );
   } catch (error) {
     cropButton.disabled = false;
@@ -1447,7 +1424,7 @@ async function saveFileCrop() {
       size: payload.size || state.sourceItem.size,
     };
     state.cropRevisions.set(getItemKey(state.sourceItem), nextRevision);
-    state.backgroundImage = await imageFromSrc(versionedImageUrl(state.sourceItem));
+    state.backgroundImage = await mediaLoader.fromSource(versionedImageUrl(state.sourceItem));
     state.crop = null;
     fileCropState.selection = null;
     fileCropDialog.close();
