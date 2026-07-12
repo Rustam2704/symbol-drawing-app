@@ -5,9 +5,7 @@ from pathlib import Path
 from threading import Thread
 from urllib.request import urlopen
 
-from http.server import ThreadingHTTPServer
-
-from server import DrawingAppHandler
+from server import DrawingAppHandler, DrawingAppServer
 from server_library import decode_image_data_url, make_item, resolve_named_file, save_cropped_image
 
 
@@ -38,7 +36,7 @@ class ServerLibraryTests(unittest.TestCase):
             decode_image_data_url("not-data")
 
     def test_static_source_files_require_revalidation(self):
-        server = ThreadingHTTPServer(("127.0.0.1", 0), DrawingAppHandler)
+        server = DrawingAppServer(("127.0.0.1", 0), DrawingAppHandler)
         thread = Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
@@ -48,6 +46,10 @@ class ServerLibraryTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
+
+    def test_server_uses_daemon_threads_and_reusable_address(self):
+        self.assertTrue(DrawingAppServer.daemon_threads)
+        self.assertTrue(DrawingAppServer.allow_reuse_address)
 
     def test_crop_save_replaces_png_atomically_and_archives_original(self):
         with tempfile.TemporaryDirectory() as directory:

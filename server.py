@@ -210,8 +210,16 @@ class DrawingAppHandler(SimpleHTTPRequestHandler):
             self.send_json(400, {"ok": False, "error": str(error)})
 
 
+class DrawingAppServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
 if __name__ == "__main__":
     os.chdir(ROOT)
-    with ThreadingHTTPServer(("127.0.0.1", PORT), DrawingAppHandler) as server:
+    with DrawingAppServer(("127.0.0.1", PORT), DrawingAppHandler) as server:
         print(f"Drawing app server: http://127.0.0.1:{PORT}")
-        server.serve_forever()
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            print("\nDrawing app server stopped.")
