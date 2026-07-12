@@ -2,6 +2,7 @@ import { getStroke } from "./vendor/perfect-freehand-package/package/dist/esm/in
 
 import { browserFiles } from "./web/browser-files.js";
 import { createAudioEffects } from "./modules/audio-effects.js";
+import { fillCanvas, renderImageContained, resizeCanvasToDisplaySize } from "./modules/canvas-utils.js";
 import { createSettingsStore, THEME_COLORS } from "./modules/app-settings.js";
 import { findAutoCropBox as findContentCropBox } from "./modules/auto-crop.js";
 import {
@@ -995,10 +996,7 @@ async function setPdfPage(pageNumber) {
 }
 
 function fitCropCanvas() {
-  const rect = cropCanvas.getBoundingClientRect();
-  const ratio = window.devicePixelRatio || 1;
-  cropCanvas.width = Math.max(1, Math.floor(rect.width * ratio));
-  cropCanvas.height = Math.max(1, Math.floor(rect.height * ratio));
+  resizeCanvasToDisplaySize(cropCanvas, window.devicePixelRatio || 1);
 }
 
 function getPreviewRect() {
@@ -1069,10 +1067,7 @@ function openCropDialog() {
 }
 
 function fitFileCropCanvas() {
-  const rect = fileCropCanvas.getBoundingClientRect();
-  const ratio = window.devicePixelRatio || 1;
-  fileCropCanvas.width = Math.max(1, Math.floor(rect.width * ratio));
-  fileCropCanvas.height = Math.max(1, Math.floor(rect.height * ratio));
+  resizeCanvasToDisplaySize(fileCropCanvas, window.devicePixelRatio || 1);
 }
 
 function getFileCropPreviewRect() {
@@ -1274,27 +1269,9 @@ async function renderPdfThumbnail(pageNumber, targetCanvas) {
 
   try {
     const source = await pdfService.renderPageCanvas(state.pdfDocument, pageNumber, 0.28);
-    const ratio = window.devicePixelRatio || 1;
-    const rect = targetCanvas.getBoundingClientRect();
-    targetCanvas.width = Math.max(1, Math.floor(rect.width * ratio));
-    targetCanvas.height = Math.max(1, Math.floor(rect.height * ratio));
-    const thumbContext = targetCanvas.getContext("2d");
-    thumbContext.fillStyle = "#102024";
-    thumbContext.fillRect(0, 0, targetCanvas.width, targetCanvas.height);
-    const scale = Math.min(targetCanvas.width / source.width, targetCanvas.height / source.height);
-    const width = source.width * scale;
-    const height = source.height * scale;
-    thumbContext.drawImage(
-      source,
-      (targetCanvas.width - width) / 2,
-      (targetCanvas.height - height) / 2,
-      width,
-      height,
-    );
+    renderImageContained(targetCanvas, source, { pixelRatio: window.devicePixelRatio || 1 });
   } catch (error) {
-    const thumbContext = targetCanvas.getContext("2d");
-    thumbContext.fillStyle = "#102024";
-    thumbContext.fillRect(0, 0, targetCanvas.width, targetCanvas.height);
+    fillCanvas(targetCanvas, "#102024");
   }
 }
 
