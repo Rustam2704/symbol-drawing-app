@@ -1564,6 +1564,8 @@ window.addEventListener("resize", () => {
   resizeFrame = window.requestAnimationFrame(updateLayoutAfterResize);
 });
 
+window.addEventListener("pagehide", () => browserFiles.dispose(), { once: true });
+
 window.addEventListener("keydown", (event) => {
   const target = event.target;
   const isEditing =
