@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { calculateRangePercent, normalizeColor, shortenMiddle } from "../modules/ui-utils.js";
+import { calculateRangePercent, getErrorMessage, normalizeColor, shortenMiddle } from "../modules/ui-utils.js";
 
 test("range percentages are normalized and clamped", () => {
   assert.equal(calculateRangePercent({ min: 0, max: 10, value: 2.5 }), 25);
@@ -12,6 +12,12 @@ test("range percentages are normalized and clamped", () => {
 test("colors are normalized", () => {
   assert.equal(normalizeColor("  #AABBCC "), "#aabbcc");
   assert.equal(normalizeColor(null), "");
+});
+
+test("errors are normalized for user-facing reporting", () => {
+  assert.equal(getErrorMessage(new Error("Failed")), "Failed");
+  assert.equal(getErrorMessage("Stopped"), "Stopped");
+  assert.equal(getErrorMessage(null), "Unexpected error.");
 });
 
 test("middle shortening respects the measurement callback", () => {

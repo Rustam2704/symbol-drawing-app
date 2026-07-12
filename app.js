@@ -38,7 +38,7 @@ import { createImageCropService } from "./modules/image-crop-service.js";
 import { createPdfService } from "./modules/pdf-service.js";
 import { createRequestGate } from "./modules/request-gate.js";
 import { createSpriteAnimation } from "./modules/sprite-animation.js";
-import { calculateRangePercent, normalizeColor, shortenMiddle } from "./modules/ui-utils.js";
+import { calculateRangePercent, getErrorMessage, normalizeColor, shortenMiddle } from "./modules/ui-utils.js";
 
 const {
   appShell,
@@ -91,6 +91,10 @@ const {
 const context = canvas.getContext("2d");
 const cropContext = cropCanvas.getContext("2d");
 const fileCropContext = fileCropCanvas.getContext("2d");
+
+function reportError(error) {
+  window.alert(getErrorMessage(error));
+}
 
 const GAUNTLET_FRAME_SIZE = 80;
 const GAUNTLET_FRAME_COUNT = 48;
@@ -837,15 +841,7 @@ async function loadImage(file) {
       renderLibrary();
     }
 
-    state.backgroundImage = image;
-    state.crop = null;
-    state.showBackground = true;
-    state.backgroundOffsetX = 0;
-    state.backgroundOffsetY = 0;
-    updateToggleButtons();
-    cropButton.disabled = false;
-    updateFileCropButton();
-    drawScene();
+    applyLoadedBackground(image);
 
     const selectedFolder = getFolderFromSelectedFile(file);
     if (selectedFolder) {
@@ -854,7 +850,7 @@ async function loadImage(file) {
     state.sourceItem = findLibraryItemForFile(file, state.libraryItems);
     updateFileCropButton();
   } catch (error) {
-    window.alert(error.message);
+    reportError(error);
   }
 }
 
@@ -898,7 +894,7 @@ async function chooseBrowserFolder() {
     applyBrowserLibrary(result);
   } catch (error) {
     if (error.name !== "AbortError") {
-      window.alert(error.message);
+      reportError(error);
     }
   } finally {
     chooseFileButton.disabled = false;
@@ -954,7 +950,7 @@ async function loadLibraryItem(item) {
     );
   } catch (error) {
     cropButton.disabled = false;
-    window.alert(error.message);
+    reportError(error);
   }
 }
 
@@ -988,7 +984,7 @@ async function setPdfPage(pageNumber) {
       drawCropPreview();
     }
   } catch (error) {
-    window.alert(error.message);
+    reportError(error);
   }
 }
 
@@ -1187,7 +1183,7 @@ async function saveFileCrop() {
     drawScene();
     await loadLibrary();
   } catch (error) {
-    window.alert(error.message);
+    reportError(error);
   } finally {
     applyFileCropButton.disabled = false;
     autoCropButton.disabled = false;

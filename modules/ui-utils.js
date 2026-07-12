@@ -10,6 +10,12 @@ export function normalizeColor(color) {
   return String(color || "").trim().toLowerCase();
 }
 
+export function getErrorMessage(error, fallback = "Unexpected error.") {
+  if (typeof error === "string" && error.trim()) return error;
+  if (error?.message) return String(error.message);
+  return fallback;
+}
+
 export function shortenMiddle(text, maxWidth, measureText) {
   if (!text || measureText(text) <= maxWidth) return text;
 
