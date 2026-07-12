@@ -16,6 +16,7 @@ import {
   previewRectToImageCrop,
   previewSquareToImageCrop,
 } from "./modules/crop-geometry.js";
+import { renderAreaCropPreview, renderFileCropPreview } from "./modules/crop-preview-renderer.js";
 import { createDeleteMotionMap, packDeleteParticles } from "./modules/delete-particles.js";
 import { createDeleteEffectController } from "./modules/delete-effect-controller.js";
 import { cloneStrokes, createHistory } from "./modules/history.js";
@@ -1009,37 +1010,17 @@ function drawCropPreview() {
     return;
   }
 
-  cropContext.clearRect(0, 0, cropCanvas.width, cropCanvas.height);
-  cropContext.fillStyle = "#f8f6f0";
-  cropContext.fillRect(0, 0, cropCanvas.width, cropCanvas.height);
-
   const preview = getPreviewRect();
   cropState.previewRect = preview;
-  cropContext.drawImage(state.backgroundImage, preview.x, preview.y, preview.width, preview.height);
-
   const selection = cropState.selection || imageCropToPreviewRect(state.crop, cropState.previewRect);
-  if (!selection) {
-    return;
-  }
-
-  cropContext.save();
-  cropContext.fillStyle = "rgba(32, 33, 36, 0.36)";
-  cropContext.fillRect(0, 0, cropCanvas.width, cropCanvas.height);
-  cropContext.drawImage(
-    state.backgroundImage,
-    (selection.x - preview.x) / preview.scale,
-    (selection.y - preview.y) / preview.scale,
-    selection.width / preview.scale,
-    selection.height / preview.scale,
-    selection.x,
-    selection.y,
-    selection.width,
-    selection.height,
-  );
-  cropContext.strokeStyle = "#237c6b";
-  cropContext.lineWidth = 3 * (window.devicePixelRatio || 1);
-  cropContext.strokeRect(selection.x, selection.y, selection.width, selection.height);
-  cropContext.restore();
+  renderAreaCropPreview({
+    canvas: cropCanvas,
+    context: cropContext,
+    image: state.backgroundImage,
+    preview,
+    selection,
+    pixelRatio: window.devicePixelRatio || 1,
+  });
 }
 
 function getCropPoint(event) {
@@ -1091,55 +1072,16 @@ function drawFileCropPreview() {
     return;
   }
 
-  fileCropContext.clearRect(0, 0, fileCropCanvas.width, fileCropCanvas.height);
-  fileCropContext.fillStyle = "#f8f6f0";
-  fileCropContext.fillRect(0, 0, fileCropCanvas.width, fileCropCanvas.height);
-
   const preview = getFileCropPreviewRect();
   fileCropState.previewRect = preview;
-  const imageRect = {
-    x: preview.x + (0 - preview.space.x) * preview.scale,
-    y: preview.y + (0 - preview.space.y) * preview.scale,
-    width: state.backgroundImage.width * preview.scale,
-    height: state.backgroundImage.height * preview.scale,
-  };
-  fileCropContext.drawImage(state.backgroundImage, imageRect.x, imageRect.y, imageRect.width, imageRect.height);
-
-  const selection = fileCropState.selection;
-  if (!selection) {
-    return;
-  }
-
-  fileCropContext.save();
-  fileCropContext.fillStyle = "rgba(32, 33, 36, 0.36)";
-  fileCropContext.fillRect(0, 0, fileCropCanvas.width, fileCropCanvas.height);
-  fileCropContext.beginPath();
-  fileCropContext.rect(selection.x, selection.y, selection.width, selection.height);
-  fileCropContext.clip();
-  fileCropContext.drawImage(
-    state.backgroundImage,
-    imageRect.x,
-    imageRect.y,
-    imageRect.width,
-    imageRect.height,
-  );
-  fileCropContext.restore();
-  fileCropContext.save();
-  fileCropContext.strokeStyle = "#237c6b";
-  fileCropContext.lineWidth = 3 * (window.devicePixelRatio || 1);
-  fileCropContext.strokeRect(selection.x, selection.y, selection.width, selection.height);
-
-  const centerX = selection.x + selection.width / 2;
-  const centerY = selection.y + selection.height / 2;
-  fileCropContext.strokeStyle = "rgba(35, 124, 107, 0.65)";
-  fileCropContext.lineWidth = 1.5 * (window.devicePixelRatio || 1);
-  fileCropContext.beginPath();
-  fileCropContext.moveTo(centerX - 8, centerY);
-  fileCropContext.lineTo(centerX + 8, centerY);
-  fileCropContext.moveTo(centerX, centerY - 8);
-  fileCropContext.lineTo(centerX, centerY + 8);
-  fileCropContext.stroke();
-  fileCropContext.restore();
+  renderFileCropPreview({
+    canvas: fileCropCanvas,
+    context: fileCropContext,
+    image: state.backgroundImage,
+    preview,
+    selection: fileCropState.selection,
+    pixelRatio: window.devicePixelRatio || 1,
+  });
 }
 
 function setDefaultFileCropSelection() {
