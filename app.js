@@ -791,6 +791,8 @@ const pdfService = createPdfService({
 });
 const libraryApi = createLibraryApi({ createUrl: apiUrl });
 const libraryRequestGate = createRequestGate();
+const mediaLoadRequestGate = createRequestGate();
+const pdfPageRequestGate = createRequestGate();
 const imageCropService = createImageCropService();
 const libraryRenderer = createLibraryRenderer({
   container: libraryList,
@@ -801,6 +803,7 @@ const libraryRenderer = createLibraryRenderer({
 });
 
 function setPdfDocument(documentProxy = null, pageCount = 0) {
+  pdfPageRequestGate.cancel();
   const previousDocument = state.pdfDocument;
   state.pdfDocument = documentProxy;
   state.pdfPage = 1;
@@ -816,6 +819,7 @@ async function loadImage(file) {
     return;
   }
 
+  const request = mediaLoadRequestGate.begin();
   cropButton.disabled = true;
   state.sourceItem = null;
   updateFileCropButton();
@@ -826,11 +830,16 @@ async function loadImage(file) {
 
     if (isPdf) {
       const pdfResult = await pdfService.readFile(file);
+      if (!request.isCurrent()) {
+        pdfService.disposeDocument(pdfResult.documentProxy);
+        return;
+      }
       image = pdfResult.image;
       setPdfDocument(pdfResult.documentProxy, pdfResult.pageCount);
       showPdfPages();
     } else {
       image = await mediaLoader.fromFile(file);
+      if (!request.isCurrent()) return;
       setPdfDocument();
       setLibraryMode("folder");
       renderLibrary();
@@ -842,10 +851,11 @@ async function loadImage(file) {
     if (selectedFolder) {
       await loadLibrary(selectedFolder);
     }
+    if (!request.isCurrent()) return;
     state.sourceItem = findLibraryItemForFile(file, state.libraryItems);
     updateFileCropButton();
   } catch (error) {
-    reportError(error);
+    if (request.isCurrent()) reportError(error);
   }
 }
 
@@ -919,6 +929,7 @@ function applyLoadedBackground(image) {
 }
 
 async function loadLibraryItem(item) {
+  const request = mediaLoadRequestGate.begin();
   cropButton.disabled = true;
   state.sourceItem = item;
   updateFileCropButton();
@@ -928,24 +939,33 @@ async function loadLibraryItem(item) {
       const buffer = item.source === "browser"
         ? await (await browserFiles.getFile(item)).arrayBuffer()
         : await libraryApi.readBuffer(item.url);
+      if (!request.isCurrent()) return;
       const pdfResult = await pdfService.readBuffer(buffer);
+      if (!request.isCurrent()) {
+        pdfService.disposeDocument(pdfResult.documentProxy);
+        return;
+      }
       setPdfDocument(pdfResult.documentProxy, pdfResult.pageCount);
       showPdfPages();
       applyLoadedBackground(pdfResult.image);
       return;
     }
 
+    const image = item.source === "browser"
+      ? await mediaLoader.fromFile(await browserFiles.getFile(item))
+      : await mediaLoader.fromSource(
+          createVersionedImageUrl(item, state.cropRevisions, state.libraryFolder),
+        );
+    if (!request.isCurrent()) return;
     setPdfDocument();
     setLibraryMode("folder");
     renderLibrary();
-    applyLoadedBackground(
-      item.source === "browser"
-        ? await mediaLoader.fromFile(await browserFiles.getFile(item))
-        : await mediaLoader.fromSource(createVersionedImageUrl(item, state.cropRevisions, state.libraryFolder)),
-    );
+    applyLoadedBackground(image);
   } catch (error) {
-    cropButton.disabled = false;
-    reportError(error);
+    if (request.isCurrent()) {
+      cropButton.disabled = false;
+      reportError(error);
+    }
   }
 }
 
@@ -959,11 +979,15 @@ async function setPdfPage(pageNumber) {
     return;
   }
 
+  const documentProxy = state.pdfDocument;
+  const request = pdfPageRequestGate.begin();
   cropButton.disabled = true;
   updateFileCropButton();
 
   try {
-    state.backgroundImage = await pdfService.renderPage(state.pdfDocument, nextPage);
+    const image = await pdfService.renderPage(documentProxy, nextPage);
+    if (!request.isCurrent() || state.pdfDocument !== documentProxy) return;
+    state.backgroundImage = image;
     state.pdfPage = nextPage;
     state.crop = null;
     cropState.selection = null;
@@ -979,7 +1003,7 @@ async function setPdfPage(pageNumber) {
       drawCropPreview();
     }
   } catch (error) {
-    reportError(error);
+    if (request.isCurrent()) reportError(error);
   }
 }
 
@@ -1536,6 +1560,8 @@ window.addEventListener(
   "pagehide",
   () => {
     libraryRequestGate.cancel();
+    mediaLoadRequestGate.cancel();
+    pdfPageRequestGate.cancel();
     sceneDrawScheduler.cancel();
     layoutResizeScheduler.cancel();
     browserFiles.dispose();
