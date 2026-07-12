@@ -21,3 +21,22 @@ test("audio preparation is scheduled and no-op environments remain safe", () => 
   assert.doesNotThrow(() => effects.stopDeleteSounds());
   assert.doesNotThrow(() => effects.dispose());
 });
+
+test("audio context creation is deferred until scheduled preparation", () => {
+  let scheduled;
+  let contextCount = 0;
+  class AudioContext {
+    constructor() {
+      contextCount += 1;
+    }
+    close() {}
+  }
+  const effects = createAudioEffects({
+    windowRef: { AudioContext },
+    schedulePrepare: (callback) => { scheduled = callback; },
+  });
+  assert.equal(contextCount, 0);
+  scheduled();
+  assert.equal(contextCount, 1);
+  effects.dispose();
+});

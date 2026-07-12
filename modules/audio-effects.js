@@ -7,11 +7,16 @@ export function createAudioEffects({
 } = {}) {
   const AudioContextClass = windowRef.AudioContext || windowRef.webkitAudioContext;
   const OfflineAudioContextClass = windowRef.OfflineAudioContext || windowRef.webkitOfflineAudioContext;
-  const audioContext = AudioContextClass ? new AudioContextClass() : null;
+  let audioContext = null;
   const activeDeleteSources = new Set();
   const activeReverseSources = new Set();
   let preparedDeleteSounds = null;
   let preparedReverseSounds = null;
+
+  function ensureAudioContext() {
+    if (!audioContext && AudioContextClass) audioContext = new AudioContextClass();
+    return audioContext;
+  }
 
   async function renderAcceleratedBuffer(buffer, rate) {
     const duration = buffer.duration / rate;
@@ -29,7 +34,7 @@ export function createAudioEffects({
   }
 
   async function prepareDeleteSounds() {
-    if (!audioContext || !OfflineAudioContextClass) {
+    if (!ensureAudioContext() || !OfflineAudioContextClass) {
       return;
     }
 
@@ -58,7 +63,7 @@ export function createAudioEffects({
   }
 
   async function prepareReverseSounds() {
-    if (!audioContext || !OfflineAudioContextClass) {
+    if (!ensureAudioContext() || !OfflineAudioContextClass) {
       return;
     }
 
@@ -153,7 +158,11 @@ export function createAudioEffects({
   function dispose() {
     stopSources(activeDeleteSources);
     stopSources(activeReverseSources);
-    audioContext?.close?.().catch?.(() => {});
+    const closeResult = audioContext?.close?.();
+    closeResult?.catch?.(() => {});
+    audioContext = null;
+    preparedDeleteSounds = null;
+    preparedReverseSounds = null;
   }
 
   schedulePrepare(() => {
