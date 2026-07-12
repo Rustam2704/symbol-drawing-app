@@ -2,6 +2,7 @@ import { getStroke } from "./vendor/perfect-freehand-package/package/dist/esm/in
 
 import { browserFiles } from "./web/browser-files.js";
 import { createAudioEffects } from "./modules/audio-effects.js";
+import { createAsyncTaskQueue } from "./modules/async-task-queue.js";
 import { queryAppElements } from "./modules/app-elements.js";
 import { fillCanvas, renderImageContained, resizeCanvasToDisplaySize } from "./modules/canvas-utils.js";
 import { createSettingsStore, THEME_COLORS } from "./modules/app-settings.js";
@@ -790,6 +791,7 @@ const pdfService = createPdfService({
   canvasToImage: mediaLoader.fromCanvas,
 });
 const libraryApi = createLibraryApi({ createUrl: apiUrl });
+const pdfThumbnailQueue = createAsyncTaskQueue({ concurrency: 2 });
 const libraryRequestGate = createRequestGate();
 const mediaLoadRequestGate = createRequestGate();
 const pdfPageRequestGate = createRequestGate();
@@ -804,6 +806,7 @@ const libraryRenderer = createLibraryRenderer({
 
 function setPdfDocument(documentProxy = null, pageCount = 0) {
   pdfPageRequestGate.cancel();
+  pdfThumbnailQueue.clear();
   const previousDocument = state.pdfDocument;
   state.pdfDocument = documentProxy;
   state.pdfPage = 1;
@@ -1222,14 +1225,19 @@ function renderPdfPages() {
 }
 
 async function renderPdfThumbnail(pageNumber, targetCanvas) {
-  if (!state.pdfDocument) {
+  const documentProxy = state.pdfDocument;
+  if (!documentProxy) {
     return;
   }
 
   try {
-    const source = await pdfService.renderPageCanvas(state.pdfDocument, pageNumber, 0.28);
+    const source = await pdfThumbnailQueue.run(() =>
+      pdfService.renderPageCanvas(documentProxy, pageNumber, 0.28),
+    );
+    if (state.pdfDocument !== documentProxy) return;
     renderImageContained(targetCanvas, source, { pixelRatio: window.devicePixelRatio || 1 });
   } catch (error) {
+    if (error.name === "AbortError") return;
     fillCanvas(targetCanvas, "#102024");
   }
 }
@@ -1562,6 +1570,7 @@ window.addEventListener(
     libraryRequestGate.cancel();
     mediaLoadRequestGate.cancel();
     pdfPageRequestGate.cancel();
+    pdfThumbnailQueue.clear();
     sceneDrawScheduler.cancel();
     layoutResizeScheduler.cancel();
     browserFiles.dispose();
