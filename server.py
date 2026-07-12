@@ -1,63 +1,24 @@
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
-from urllib.parse import parse_qs, quote, unquote, urlparse
-import base64
+from urllib.parse import parse_qs, quote, urlparse
 import json
 import mimetypes
 import os
-import re
 import shutil
 import tkinter as tk
 from tkinter import filedialog
 
+from server_library import (
+    IMAGE_EXTENSIONS,
+    IMAGES_DIR,
+    LIBRARY_EXTENSIONS,
+    ROOT,
+    decode_image_data_url,
+    make_item,
+    resolve_folder,
+    resolve_named_file,
+)
 
-ROOT = Path(__file__).resolve().parent
-IMAGES_DIR = ROOT / "images"
 PORT = int(os.environ.get("PORT", "5173"))
-ALLOWED_LIBRARY_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".ico", ".avif", ".gif", ".svg", ".pdf"}
-
-
-def resolve_folder(raw_folder=""):
-    if raw_folder:
-        folder = Path(unquote(raw_folder)).expanduser()
-        if not folder.is_absolute():
-            folder = (ROOT / folder).resolve()
-        else:
-            folder = folder.resolve()
-    else:
-        folder = IMAGES_DIR.resolve()
-
-    if not folder.exists() or not folder.is_dir():
-        raise ValueError("Folder was not found.")
-
-    return folder
-
-
-def resolve_named_file(folder, name):
-    if name != Path(name).name or not name:
-        raise ValueError("Invalid file name.")
-
-    file_path = (folder / name).resolve()
-    if folder.resolve() not in file_path.parents or not file_path.is_file():
-        raise ValueError("File was not found.")
-
-    return file_path
-
-
-def make_item(path):
-    folder = path.parent.resolve()
-    stat = path.stat()
-    mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    return {
-        "name": path.name,
-        "folder": str(folder),
-        "url": f"/api/file?dir={quote(str(folder))}&name={quote(path.name)}",
-        "type": "pdf" if path.suffix.lower() == ".pdf" else "image",
-        "mime": mime_type,
-        "mtime": stat.st_mtime,
-        "ctime": stat.st_ctime,
-        "size": stat.st_size,
-    }
 
 
 class DrawingAppHandler(SimpleHTTPRequestHandler):
@@ -98,7 +59,7 @@ class DrawingAppHandler(SimpleHTTPRequestHandler):
             folder = resolve_folder(query.get("dir", [""])[0])
 
             for path in sorted(folder.iterdir(), key=lambda item: item.name.casefold()):
-                if not path.is_file() or path.suffix.lower() not in ALLOWED_LIBRARY_EXTENSIONS:
+                if not path.is_file() or path.suffix.lower() not in LIBRARY_EXTENSIONS:
                     continue
                 items.append(make_item(path))
             payload = {"folder": str(folder), "items": items}
@@ -186,7 +147,7 @@ class DrawingAppHandler(SimpleHTTPRequestHandler):
                 return
 
             file_path = Path(selected).resolve()
-            if not file_path.is_file() or file_path.suffix.lower() not in ALLOWED_LIBRARY_EXTENSIONS:
+            if not file_path.is_file() or file_path.suffix.lower() not in LIBRARY_EXTENSIONS:
                 raise ValueError("Selected file type is not supported.")
 
             self.send_json(200, {"ok": True, "folder": str(file_path.parent), "item": make_item(file_path)})
@@ -210,8 +171,6 @@ class DrawingAppHandler(SimpleHTTPRequestHandler):
         return json.loads(self.rfile.read(length).decode("utf-8"))
 
     def crop_image(self):
-        allowed = {".png", ".jpg", ".jpeg", ".webp", ".ico", ".avif", ".gif", ".svg"}
-
         try:
             payload = self.read_json()
             folder = resolve_folder(str(payload.get("folder") or ""))
@@ -219,17 +178,10 @@ class DrawingAppHandler(SimpleHTTPRequestHandler):
             data_url = str(payload.get("dataUrl") or "")
             image_path = resolve_named_file(folder, name)
 
-            if image_path.suffix.lower() not in allowed:
+            if image_path.suffix.lower() not in IMAGE_EXTENSIONS:
                 raise ValueError("Only image files can be cropped.")
 
-            match = re.fullmatch(r"data:(image/[^;]+);base64,(.+)", data_url, re.DOTALL)
-            if not match:
-                raise ValueError("Invalid cropped image data.")
-
-            cropped_mime = match.group(1).lower()
-            cropped_bytes = base64.b64decode(match.group(2), validate=True)
-            if not cropped_bytes:
-                raise ValueError("Cropped image is empty.")
+            cropped_mime, cropped_bytes = decode_image_data_url(data_url)
 
             old_dir = folder / "old"
             old_dir.mkdir(parents=True, exist_ok=True)

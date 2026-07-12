@@ -390,6 +390,16 @@ function drawScene() {
   drawStrokes();
 }
 
+let scheduledSceneFrame = null;
+
+function scheduleSceneDraw() {
+  if (scheduledSceneFrame !== null) return;
+  scheduledSceneFrame = requestAnimationFrame(() => {
+    scheduledSceneFrame = null;
+    drawScene();
+  });
+}
+
 let deleteMotionMap = null;
 const deleteMaskCanvas = document.createElement("canvas");
 const deleteMaskContext = deleteMaskCanvas.getContext("2d", { willReadFrequently: true });
@@ -856,7 +866,7 @@ function continueDrawing(event) {
     state.backgroundOffsetX += point.x - state.lastPanPoint.x;
     state.backgroundOffsetY += point.y - state.lastPanPoint.y;
     state.lastPanPoint = point;
-    drawScene();
+    scheduleSceneDraw();
     return;
   }
 
@@ -1424,6 +1434,8 @@ function renderPdfPages() {
     return;
   }
 
+  const fragment = document.createDocumentFragment();
+  const thumbnails = [];
   for (const pageNumber of state.pdfPages) {
     const button = document.createElement("button");
     button.className = "library-item";
@@ -1439,10 +1451,11 @@ function renderPdfPages() {
     name.className = "library-name";
     name.textContent = `Page ${pageNumber}`;
     button.append(name);
-    libraryList.append(button);
-
-    renderPdfThumbnail(pageNumber, thumb);
+    fragment.append(button);
+    thumbnails.push([pageNumber, thumb]);
   }
+  libraryList.append(fragment);
+  thumbnails.forEach(([pageNumber, thumb]) => renderPdfThumbnail(pageNumber, thumb));
 }
 
 async function renderPdfThumbnail(pageNumber, targetCanvas) {
@@ -1492,6 +1505,7 @@ function renderLibrary() {
     return;
   }
 
+  const fragment = document.createDocumentFragment();
   for (const item of items) {
     const button = document.createElement("button");
     button.className = "library-item";
@@ -1516,8 +1530,9 @@ function renderLibrary() {
     name.className = "library-name";
     name.textContent = item.name.replace(/\.[^.]+$/, "");
     button.append(name);
-    libraryList.append(button);
+    fragment.append(button);
   }
+  libraryList.append(fragment);
 }
 
 function readDirectoryListing(html) {
@@ -1679,13 +1694,13 @@ penSizeInput.addEventListener("input", () => {
 backgroundOpacityInput.addEventListener("input", () => {
   state.backgroundTransparency = Number(backgroundOpacityInput.value);
   updateRangeValues();
-  drawScene();
+  scheduleSceneDraw();
 });
 
 backgroundScaleInput.addEventListener("input", () => {
   state.backgroundScale = Number(backgroundScaleInput.value);
   updateRangeValues();
-  drawScene();
+  scheduleSceneDraw();
 });
 
 gridToggle.addEventListener("click", () => {
