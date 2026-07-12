@@ -4,8 +4,8 @@ import json
 import mimetypes
 import os
 import shutil
-import tkinter as tk
-from tkinter import filedialog
+
+from native_file_dialogs import select_image_folder, select_image_or_pdf
 
 from server_library import (
     IMAGE_EXTENSIONS,
@@ -110,14 +110,7 @@ class DrawingAppHandler(SimpleHTTPRequestHandler):
             dialog_x = int(float(query.get("x", ["120"])[0]))
             dialog_y = int(float(query.get("y", ["120"])[0]))
 
-            root = tk.Tk()
-            root.geometry(f"1x1+{dialog_x}+{dialog_y}")
-            root.attributes("-topmost", True)
-            root.attributes("-alpha", 0.01)
-            root.update_idletasks()
-            root.lift()
-            selected = filedialog.askdirectory(parent=root, initialdir=initial_dir, title="Select image folder")
-            root.destroy()
+            selected = select_image_folder(initial_dir, dialog_x, dialog_y)
 
             self.send_json(200, {"ok": True, "folder": selected})
         except Exception as error:
@@ -131,24 +124,7 @@ class DrawingAppHandler(SimpleHTTPRequestHandler):
             dialog_x = int(float(query.get("x", ["120"])[0]))
             dialog_y = int(float(query.get("y", ["120"])[0]))
 
-            root = tk.Tk()
-            root.geometry(f"1x1+{dialog_x}+{dialog_y}")
-            root.attributes("-topmost", True)
-            root.attributes("-alpha", 0.01)
-            root.update_idletasks()
-            root.lift()
-            selected = filedialog.askopenfilename(
-                parent=root,
-                initialdir=initial_dir,
-                title="Choose image or PDF",
-                filetypes=[
-                    ("Images and PDF", "*.png *.jpg *.jpeg *.webp *.ico *.avif *.gif *.svg *.pdf"),
-                    ("Images", "*.png *.jpg *.jpeg *.webp *.ico *.avif *.gif *.svg"),
-                    ("PDF", "*.pdf"),
-                    ("All files", "*.*"),
-                ],
-            )
-            root.destroy()
+            selected = select_image_or_pdf(initial_dir, dialog_x, dialog_y)
 
             if not selected:
                 self.send_json(200, {"ok": True, "item": None, "folder": ""})
