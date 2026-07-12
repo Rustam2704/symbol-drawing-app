@@ -35,6 +35,7 @@ import { createLibraryApi } from "./modules/library-api.js";
 import { createLibraryRenderer } from "./modules/library-renderer.js";
 import { createMediaLoader } from "./modules/media-loader.js";
 import { createImageCropService } from "./modules/image-crop-service.js";
+import { createKeyboardShortcutHandler } from "./modules/keyboard-shortcuts.js";
 import { createPdfService } from "./modules/pdf-service.js";
 import { createRequestGate } from "./modules/request-gate.js";
 import { createSpriteAnimation } from "./modules/sprite-animation.js";
@@ -1271,19 +1272,11 @@ async function loadLibrary(folder = state.libraryFolder) {
 }
 
 clearButton.addEventListener("click", deleteAllStrokes);
-
-document.addEventListener("keydown", (event) => {
-  if (event.repeat) {
-    return;
-  }
-  if (event.key === "Delete") {
-    event.preventDefault();
-    deleteAllStrokes();
-  } else if (event.key === "Backspace") {
-    event.preventDefault();
-    undoLastStroke();
-  }
+const handleKeyboardShortcut = createKeyboardShortcutHandler({
+  onClear: deleteAllStrokes,
+  onUndo: undoLastStroke,
 });
+window.addEventListener("keydown", handleKeyboardShortcut);
 
 undoButton.addEventListener("click", undoLastStroke);
 
@@ -1561,27 +1554,10 @@ window.addEventListener(
     gauntletAnimation.dispose();
     timeGauntletAnimation.dispose();
     pdfService.disposeDocument(state.pdfDocument);
+    window.removeEventListener("keydown", handleKeyboardShortcut);
   },
   { once: true },
 );
-
-window.addEventListener("keydown", (event) => {
-  const target = event.target;
-  const isEditing =
-    target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement ||
-    target?.isContentEditable;
-
-  if (isEditing) {
-    return;
-  }
-
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !event.shiftKey) {
-    event.preventDefault();
-    undoLastStroke();
-  }
-});
 
 setTheme(state.theme, { updatePen: state.theme !== "current" });
 updateMenuSwap();
