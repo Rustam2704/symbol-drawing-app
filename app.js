@@ -1,5 +1,7 @@
 import { getStroke } from "./vendor/perfect-freehand-package/package/dist/esm/index.mjs";
 
+import { browserFiles } from "./web/browser-files.js";
+
 const appShell = document.querySelector(".app-shell");
 const canvas = document.querySelector("#practiceCanvas");
 const context = canvas.getContext("2d");
@@ -244,6 +246,7 @@ const state = {
   librarySort: "date",
   libraryMode: "folder",
   libraryFolder: "",
+  fileSource: "local",
   pdfPages: [],
   sourceItem: null,
   cropRevisions: new Map(),
@@ -654,6 +657,33 @@ function getDeleteEffectDuration(particles) {
   return particles.reduce((duration, particle) => Math.max(duration, particle.delay + particle.duration), 0);
 }
 
+function startDeleteEffect(deleteHistoryNode, snapshot, background) {
+  // The pixel scan is relatively expensive on a high-DPI canvas. Run it only
+  // after the cleared scene has had a chance to reach the screen.
+  const particles = createDeleteParticles(snapshot, background);
+
+  if (!particles.length || currentHistoryNode.id !== deleteHistoryNode.id) {
+    return;
+  }
+
+  const duration = getDeleteEffectDuration(particles);
+  deleteHistoryNode.deleteEffect = {
+    snapshot,
+    particles,
+    duration,
+  };
+  state.deleteEffects.push({
+    historyId: deleteHistoryNode.id,
+    snapshot,
+    particles,
+    duration,
+    direction: "forward",
+    elapsed: 0,
+    lastTimestamp: null,
+  });
+  ensureDeleteAnimationRunning();
+}
+
 function drawDeleteParticle(effect, particle, sampleTime) {
   const localTime = sampleTime - particle.delay;
   let x = particle.sx;
@@ -782,29 +812,10 @@ function deleteAllStrokes() {
   background.width = canvas.width;
   background.height = canvas.height;
   background.getContext("2d").drawImage(canvas, 0, 0);
-  const particles = createDeleteParticles(snapshot, background);
   updateUndoButton();
-
-  if (!particles.length) {
-    return;
-  }
-
-  const duration = getDeleteEffectDuration(particles);
-  deleteHistoryNode.deleteEffect = {
-    snapshot,
-    particles,
-    duration,
-  };
-  state.deleteEffects.push({
-    historyId: deleteHistoryNode.id,
-    snapshot,
-    particles,
-    duration,
-    direction: "forward",
-    elapsed: 0,
-    lastTimestamp: null,
+  requestAnimationFrame(() => {
+    window.setTimeout(() => startDeleteEffect(deleteHistoryNode, snapshot, background), 0);
   });
-  ensureDeleteAnimationRunning();
 }
 
 function updateUndoButton() {
@@ -934,10 +945,14 @@ function compareNames(a, b) {
 }
 
 function updateFileCropButton() {
-  fileCropButton.disabled = !state.backgroundImage || !canCropSourceItem(state.sourceItem);
+  const browserReadOnly = state.fileSource === "browser" && !browserFiles.canWrite();
+  fileCropButton.disabled = !state.backgroundImage || !canCropSourceItem(state.sourceItem) || browserReadOnly;
 }
 
 function versionedImageUrl(item) {
+  if (item.source === "browser") {
+    return item.url;
+  }
   const fileVersion = `${item.mtime || 0}-${item.size || 0}`;
   const cropRevision = state.cropRevisions.get(getItemKey(item)) || 0;
   const version = `${fileVersion}-${cropRevision}`;
@@ -1316,10 +1331,38 @@ async function chooseFileFromServer() {
       ) || payload.item;
     await loadLibraryItem(selectedItem);
   } catch (error) {
-    window.alert(error.message);
+    await chooseBrowserFolder();
   } finally {
     chooseFileButton.disabled = false;
   }
+}
+
+async function chooseBrowserFolder() {
+  chooseFileButton.disabled = true;
+  try {
+    const result = await browserFiles.chooseFolder();
+    if (!result) {
+      return;
+    }
+    state.fileSource = "browser";
+    applyBrowserLibrary(result);
+  } catch (error) {
+    if (error.name !== "AbortError") {
+      window.alert(error.message);
+    }
+  } finally {
+    chooseFileButton.disabled = false;
+  }
+}
+
+function applyBrowserLibrary(result) {
+  state.libraryFolder = result.folder;
+  state.libraryItems = result.items;
+  folderPathInput.readOnly = true;
+  folderPathInput.title = "Browsers do not expose the full local folder path.";
+  chooseFileButton.textContent = "Choose folder";
+  renderLibrary();
+  updateFileCropButton();
 }
 
 function applyLoadedBackground(image) {
@@ -1341,8 +1384,10 @@ async function loadLibraryItem(item) {
 
   try {
     if (item.type === "pdf") {
-      const response = await fetch(item.url);
-      const pdfResult = await readPdfBuffer(await response.arrayBuffer());
+      const buffer = item.source === "browser"
+        ? await (await browserFiles.getFile(item)).arrayBuffer()
+        : await (await fetch(item.url)).arrayBuffer();
+      const pdfResult = await readPdfBuffer(buffer);
       state.pdfDocument = pdfResult.documentProxy;
       state.pdfPage = 1;
       state.pdfPageCount = pdfResult.pageCount;
@@ -1357,7 +1402,9 @@ async function loadLibraryItem(item) {
     state.pdfPages = [];
     setLibraryMode("folder");
     renderLibrary();
-    applyLoadedBackground(await imageFromSrc(versionedImageUrl(item)));
+    applyLoadedBackground(
+      item.source === "browser" ? await readImageFile(await browserFiles.getFile(item)) : await imageFromSrc(versionedImageUrl(item)),
+    );
   } catch (error) {
     cropButton.disabled = false;
     window.alert(error.message);
@@ -1857,13 +1904,26 @@ async function saveFileCrop() {
   autoCropButton.disabled = true;
 
   try {
+    const dataUrl = cropImageToDataUrl(crop);
+    if (state.fileSource === "browser") {
+      const saved = await browserFiles.saveCrop(state.sourceItem, dataUrl);
+      fileCropState.selection = null;
+      fileCropDialog.close();
+      await loadLibrary();
+      const updatedItem = state.libraryItems.find((item) => item.name === saved.name);
+      if (updatedItem) {
+        await loadLibraryItem(updatedItem);
+      }
+      return;
+    }
+
     const response = await fetch("/api/crop-image", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         folder: state.sourceItem.folder || state.libraryFolder,
         name: state.sourceItem.name,
-        dataUrl: cropImageToDataUrl(crop),
+        dataUrl,
       }),
     });
     const payload = await response.json();
@@ -2047,6 +2107,11 @@ function readDirectoryListing(html) {
 
 async function loadLibrary(folder = state.libraryFolder) {
   setLibraryMode("folder");
+  if (state.fileSource === "browser" && browserFiles.isActive()) {
+    libraryList.innerHTML = '<div class="library-empty">Scanning images...</div>';
+    applyBrowserLibrary(await browserFiles.scan());
+    return;
+  }
   if (folder) {
     state.libraryFolder = folder;
   }
@@ -2061,6 +2126,9 @@ async function loadLibrary(folder = state.libraryFolder) {
     const payload = await response.json();
     state.libraryFolder = payload.folder || state.libraryFolder;
     state.libraryItems = payload.items || [];
+    state.fileSource = "local";
+    folderPathInput.readOnly = false;
+    chooseFileButton.textContent = "Choose image or PDF";
   } catch (error) {
     try {
       const response = await fetch("/images/", { cache: "no-store" });
@@ -2070,7 +2138,10 @@ async function loadLibrary(folder = state.libraryFolder) {
       state.libraryItems = readDirectoryListing(await response.text());
     } catch (fallbackError) {
       state.libraryItems = [];
-      libraryList.innerHTML = `<div class="library-empty">Could not scan images folder. ${fallbackError.message}</div>`;
+      state.fileSource = "browser";
+      folderPathInput.readOnly = true;
+      chooseFileButton.textContent = "Choose folder";
+      libraryList.innerHTML = '<div class="library-empty">Choose a local folder to display its images and PDFs.</div>';
       return;
     }
   }
@@ -2139,6 +2210,10 @@ folderPathInput.addEventListener("focus", () => {
 });
 
 folderPathInput.addEventListener("blur", () => {
+  if (state.fileSource === "browser") {
+    updateFolderPathDisplay();
+    return;
+  }
   const nextFolder = folderPathInput.value.trim();
   if (nextFolder && nextFolder !== state.libraryFolder) {
     loadLibrary(nextFolder);
