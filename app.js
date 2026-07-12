@@ -27,6 +27,7 @@ import { createLibraryApi } from "./modules/library-api.js";
 import { createMediaLoader } from "./modules/media-loader.js";
 import { createPdfService } from "./modules/pdf-service.js";
 import { createSpriteAnimation } from "./modules/sprite-animation.js";
+import { calculateRangePercent, normalizeColor, shortenMiddle } from "./modules/ui-utils.js";
 
 const appShell = document.querySelector(".app-shell");
 const canvas = document.querySelector("#practiceCanvas");
@@ -614,15 +615,7 @@ function updateRangeValues() {
 }
 
 function updateRangeFill(input) {
-  const min = Number(input.min) || 0;
-  const max = Number(input.max) || 100;
-  const value = Number(input.value);
-  const percent = max === min ? 0 : ((value - min) / (max - min)) * 100;
-  input.style.setProperty("--range-progress", `${Math.max(0, Math.min(100, percent))}%`);
-}
-
-function normalizeColor(color) {
-  return String(color || "").trim().toLowerCase();
+  input.style.setProperty("--range-progress", `${calculateRangePercent(input)}%`);
 }
 
 function updateColorPalette() {
@@ -753,32 +746,6 @@ function getFolderPathTextWidth(text) {
   return measuringContext.measureText(text).width;
 }
 
-function shortenMiddle(text, maxWidth) {
-  if (!text || getFolderPathTextWidth(text) <= maxWidth) {
-    return text;
-  }
-
-  let low = 2;
-  let high = text.length - 1;
-  let best = `${text.slice(0, 1)}...${text.slice(-1)}`;
-
-  while (low <= high) {
-    const visibleCount = Math.floor((low + high) / 2);
-    const headLength = Math.max(1, Math.ceil(visibleCount * 0.45));
-    const tailLength = Math.max(1, visibleCount - headLength);
-    const candidate = `${text.slice(0, headLength)}...${text.slice(-tailLength)}`;
-
-    if (getFolderPathTextWidth(candidate) <= maxWidth) {
-      best = candidate;
-      low = visibleCount + 1;
-    } else {
-      high = visibleCount - 1;
-    }
-  }
-
-  return best;
-}
-
 function updateFolderPathDisplay(forceFull = false) {
   const fullPath = state.libraryFolder || "";
   folderPathInput.title = fullPath;
@@ -791,7 +758,7 @@ function updateFolderPathDisplay(forceFull = false) {
   const style = window.getComputedStyle(folderPathInput);
   const horizontalPadding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
   const availableWidth = Math.max(20, (folderPathInput.clientWidth || 120) - horizontalPadding + 11);
-  folderPathInput.value = shortenMiddle(fullPath, availableWidth);
+  folderPathInput.value = shortenMiddle(fullPath, availableWidth, getFolderPathTextWidth);
 }
 
 function setLibraryMode(mode) {
