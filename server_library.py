@@ -72,6 +72,20 @@ def decode_image_data_url(data_url):
     return match.group(1).lower(), content
 
 
+def get_available_archive_path(old_dir, file_name):
+    preferred_path = old_dir / file_name
+    if not preferred_path.exists():
+        return preferred_path
+
+    source = Path(file_name)
+    revision = 2
+    while True:
+        candidate = old_dir / f"{source.stem}.{revision}{source.suffix}"
+        if not candidate.exists():
+            return candidate
+        revision += 1
+
+
 def save_cropped_image(folder, image_path, cropped_mime, cropped_bytes):
     output_path = image_path
     if image_path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
@@ -84,7 +98,7 @@ def save_cropped_image(folder, image_path, cropped_mime, cropped_bytes):
 
     old_dir = folder / "old"
     old_dir.mkdir(parents=True, exist_ok=True)
-    archived_path = old_dir / image_path.name
+    archived_path = get_available_archive_path(old_dir, image_path.name)
     shutil.copy2(image_path, archived_path)
 
     temporary_path = output_path.with_name(f".{output_path.name}.{uuid4().hex}.tmp")

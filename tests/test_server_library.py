@@ -93,6 +93,21 @@ class ServerLibraryTests(unittest.TestCase):
             self.assertFalse(image.exists())
             self.assertEqual(archived.read_bytes(), b"jpeg")
 
+    def test_repeated_crop_preserves_every_archived_revision(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            image = folder / "symbol.png"
+            image.write_bytes(b"original")
+
+            _, first_archive = save_cropped_image(folder, image, "image/png", b"first crop")
+            _, second_archive = save_cropped_image(folder, image, "image/png", b"second crop")
+
+            self.assertEqual(first_archive.name, "symbol.png")
+            self.assertEqual(first_archive.read_bytes(), b"original")
+            self.assertEqual(second_archive.name, "symbol.2.png")
+            self.assertEqual(second_archive.read_bytes(), b"first crop")
+            self.assertEqual(image.read_bytes(), b"second crop")
+
 
 if __name__ == "__main__":
     unittest.main()
