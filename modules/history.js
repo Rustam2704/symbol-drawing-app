@@ -5,7 +5,7 @@ export function cloneStrokes(strokes) {
   }));
 }
 
-export function createHistory({ limit = 20 } = {}) {
+export function createHistory({ limit = 50 } = {}) {
   const root = {
     id: 0,
     kind: "root",

@@ -243,7 +243,7 @@ const state = {
   deleteAnimationFrame: null,
 };
 
-const history = createHistory({ limit: 20 });
+const history = createHistory({ limit: 50 });
 
 function recordHistory(kind) {
   const node = history.record(kind, state.strokes);
@@ -345,30 +345,35 @@ function drawGrid() {
   context.save();
   context.strokeStyle = themeColors.grid;
   context.lineWidth = 1;
+  context.beginPath();
 
   for (let x = centerX % step; x < canvas.width; x += step) {
-    line(x, 0, x, canvas.height);
+    context.moveTo(x, 0);
+    context.lineTo(x, canvas.height);
   }
 
   for (let y = centerY % step; y < canvas.height; y += step) {
-    line(0, y, canvas.width, y);
+    context.moveTo(0, y);
+    context.lineTo(canvas.width, y);
   }
+  context.stroke();
 
   context.strokeStyle = themeColors.guide;
-  line(centerX, 0, centerX, canvas.height);
-  line(0, centerY, canvas.width, centerY);
+  context.beginPath();
+  context.moveTo(centerX, 0);
+  context.lineTo(centerX, canvas.height);
+  context.moveTo(0, centerY);
+  context.lineTo(canvas.width, centerY);
+  context.stroke();
 
   context.strokeStyle = themeColors.margin;
-  line(0, 0, canvas.width, canvas.height);
-  line(canvas.width, 0, 0, canvas.height);
-  context.restore();
-}
-
-function line(x1, y1, x2, y2) {
   context.beginPath();
-  context.moveTo(x1, y1);
-  context.lineTo(x2, y2);
+  context.moveTo(0, 0);
+  context.lineTo(canvas.width, canvas.height);
+  context.moveTo(canvas.width, 0);
+  context.lineTo(0, canvas.height);
   context.stroke();
+  context.restore();
 }
 
 function drawBackgroundImage() {
@@ -406,6 +411,20 @@ function drawStroke(stroke) {
   }
 }
 
+const freehandOutlineCache = new WeakMap();
+
+function getFreehandOutline(stroke, options) {
+  const cached = freehandOutlineCache.get(stroke);
+  if (cached?.pointCount === stroke.points.length) {
+    return cached.outline;
+  }
+
+  const inputPoints = stroke.points.map((point) => [point.x, point.y, point.pressure || 0.5]);
+  const outline = getStroke(inputPoints, options);
+  freehandOutlineCache.set(stroke, { pointCount: stroke.points.length, outline });
+  return outline;
+}
+
 function drawFreehandStroke(stroke) {
   if (!stroke.points.length) {
     return;
@@ -413,8 +432,7 @@ function drawFreehandStroke(stroke) {
 
   const baseSize = Math.max(1, stroke.size || state.penSize * (window.devicePixelRatio || 1));
   const options = getFreehandOptions(stroke.type, baseSize);
-  const inputPoints = stroke.points.map((point) => [point.x, point.y, point.pressure || 0.5]);
-  const outline = getStroke(inputPoints, options);
+  const outline = getFreehandOutline(stroke, options);
 
   context.save();
   context.fillStyle = stroke.color;
