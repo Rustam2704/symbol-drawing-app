@@ -106,9 +106,22 @@ const timeGauntletAnimation = createSpriteAnimation({
   frameCount: GAUNTLET_FRAME_COUNT,
   frameDuration: GAUNTLET_FRAME_DURATION,
 });
-const { playPreparedDeleteSound, playReverseSound, stopDeleteSounds } = createAudioEffects({
+const scheduleIdleWork = (callback) => {
+  if ("requestIdleCallback" in window) {
+    window.requestIdleCallback(callback, { timeout: 1000 });
+  } else {
+    window.setTimeout(callback, 0);
+  }
+};
+const {
+  dispose: disposeAudioEffects,
+  playPreparedDeleteSound,
+  playReverseSound,
+  stopDeleteSounds,
+} = createAudioEffects({
   deleteRate: 2,
   reverseRate: 2,
+  schedulePrepare: scheduleIdleWork,
 });
 
 const settings = createSettingsStore();
@@ -1544,6 +1557,7 @@ window.addEventListener(
   () => {
     libraryRequestGate.cancel();
     browserFiles.dispose();
+    disposeAudioEffects();
   },
   { once: true },
 );

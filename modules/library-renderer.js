@@ -36,6 +36,7 @@ export function createLibraryRenderer({
         const image = document.createElement("img");
         image.src = getItemUrl(item);
         image.alt = "";
+        image.decoding = "async";
         image.loading = "lazy";
         button.append(image);
       }

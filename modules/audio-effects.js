@@ -1,8 +1,15 @@
-export function createAudioEffects({ deleteRate = 2, reverseRate = 2 } = {}) {
-  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-  const OfflineAudioContextClass = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+export function createAudioEffects({
+  deleteRate = 2,
+  reverseRate = 2,
+  windowRef = globalThis.window || {},
+  fetchImpl = globalThis.fetch,
+  schedulePrepare = (callback) => callback(),
+} = {}) {
+  const AudioContextClass = windowRef.AudioContext || windowRef.webkitAudioContext;
+  const OfflineAudioContextClass = windowRef.OfflineAudioContext || windowRef.webkitOfflineAudioContext;
   const audioContext = AudioContextClass ? new AudioContextClass() : null;
   const activeDeleteSources = new Set();
+  const activeReverseSources = new Set();
   let preparedDeleteSounds = null;
   let preparedReverseSounds = null;
 
@@ -33,7 +40,7 @@ export function createAudioEffects({ deleteRate = 2, reverseRate = 2 } = {}) {
       ];
       const encoded = await Promise.all(
         paths.map(async (path) => {
-          const response = await fetch(path);
+          const response = await fetchImpl(path);
           if (!response.ok) {
             throw new Error(`Could not preload ${path}`);
           }
@@ -62,7 +69,7 @@ export function createAudioEffects({ deleteRate = 2, reverseRate = 2 } = {}) {
       ];
       const encoded = await Promise.all(
         paths.map(async (path) => {
-          const response = await fetch(path);
+          const response = await fetchImpl(path);
           if (!response.ok) {
             throw new Error(`Could not preload ${path}`);
           }
@@ -126,14 +133,36 @@ export function createAudioEffects({ deleteRate = 2, reverseRate = 2 } = {}) {
       const source = audioContext.createBufferSource();
       source.buffer = buffer;
       source.connect(audioContext.destination);
+      activeReverseSources.add(source);
+      source.addEventListener("ended", () => activeReverseSources.delete(source), { once: true });
       source.start(startTime);
     });
   }
 
-  prepareDeleteSounds();
-  prepareReverseSounds();
+  function stopSources(sources) {
+    sources.forEach((source) => {
+      try {
+        source.stop();
+      } catch {
+        // The source may already be stopped.
+      }
+    });
+    sources.clear();
+  }
+
+  function dispose() {
+    stopSources(activeDeleteSources);
+    stopSources(activeReverseSources);
+    audioContext?.close?.().catch?.(() => {});
+  }
+
+  schedulePrepare(() => {
+    prepareDeleteSounds();
+    prepareReverseSounds();
+  });
 
   return {
+    dispose,
     playPreparedDeleteSound,
     playReverseSound,
     stopDeleteSounds,
