@@ -6,7 +6,13 @@ from threading import Thread
 from urllib.request import urlopen
 
 from server import DrawingAppHandler, DrawingAppServer
-from server_library import decode_image_data_url, make_item, resolve_named_file, save_cropped_image
+from server_library import (
+    decode_image_data_url,
+    make_item,
+    resolve_named_file,
+    resolve_selected_library_file,
+    save_cropped_image,
+)
 
 
 class ServerLibraryTests(unittest.TestCase):
@@ -50,6 +56,20 @@ class ServerLibraryTests(unittest.TestCase):
     def test_server_uses_daemon_threads_and_reusable_address(self):
         self.assertTrue(DrawingAppServer.daemon_threads)
         self.assertTrue(DrawingAppServer.allow_reuse_address)
+
+    def test_selected_library_file_is_resolved_and_validated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            image_path = folder / "symbol.PNG"
+            image_path.write_bytes(b"image")
+            unsupported_path = folder / "notes.txt"
+            unsupported_path.write_text("notes", encoding="utf-8")
+
+            self.assertEqual(resolve_selected_library_file(image_path), image_path.resolve())
+            with self.assertRaisesRegex(ValueError, "not supported"):
+                resolve_selected_library_file(unsupported_path)
+            with self.assertRaisesRegex(ValueError, "not found"):
+                resolve_selected_library_file(folder / "missing.png")
 
     def test_crop_save_replaces_png_atomically_and_archives_original(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -16,6 +16,7 @@ from server_library import (
     make_item,
     resolve_folder,
     resolve_named_file,
+    resolve_selected_library_file,
     save_cropped_image,
 )
 
@@ -153,9 +154,7 @@ class DrawingAppHandler(SimpleHTTPRequestHandler):
                 self.send_json(200, {"ok": True, "item": None, "folder": ""})
                 return
 
-            file_path = Path(selected).resolve()
-            if not file_path.is_file() or file_path.suffix.lower() not in LIBRARY_EXTENSIONS:
-                raise ValueError("Selected file type is not supported.")
+            file_path = resolve_selected_library_file(selected)
 
             self.send_json(200, {"ok": True, "folder": str(file_path.parent), "item": make_item(file_path)})
         except Exception as error:

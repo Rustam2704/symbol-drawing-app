@@ -34,6 +34,15 @@ def resolve_named_file(folder, name):
     return file_path
 
 
+def resolve_selected_library_file(raw_path):
+    file_path = Path(raw_path).expanduser().resolve()
+    if not file_path.is_file():
+        raise ValueError("Selected file was not found.")
+    if file_path.suffix.lower() not in LIBRARY_EXTENSIONS:
+        raise ValueError("Selected file type is not supported.")
+    return file_path
+
+
 def make_item(path):
     folder = path.parent.resolve()
     stat = path.stat()
