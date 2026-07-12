@@ -20,6 +20,7 @@ import {
 import { renderAreaCropPreview, renderFileCropPreview } from "./modules/crop-preview-renderer.js";
 import { createDeleteMotionMap, packDeleteParticles } from "./modules/delete-particles.js";
 import { createDeleteEffectController } from "./modules/delete-effect-controller.js";
+import { createFrameScheduler } from "./modules/frame-scheduler.js";
 import { cloneStrokes, createHistory } from "./modules/history.js";
 import {
   canCropSourceItem,
@@ -419,15 +420,8 @@ function drawScene() {
   drawStrokes();
 }
 
-let scheduledSceneFrame = null;
-
-function scheduleSceneDraw() {
-  if (scheduledSceneFrame !== null) return;
-  scheduledSceneFrame = requestAnimationFrame(() => {
-    scheduledSceneFrame = null;
-    drawScene();
-  });
-}
+const sceneDrawScheduler = createFrameScheduler(drawScene);
+const scheduleSceneDraw = sceneDrawScheduler.schedule;
 
 let deleteMotionMap = null;
 const deleteMaskCanvas = document.createElement("canvas");
@@ -1513,10 +1507,7 @@ canvas.addEventListener("pointerup", stopDrawing);
 canvas.addEventListener("pointercancel", stopDrawing);
 canvas.addEventListener("lostpointercapture", stopDrawing);
 
-let resizeFrame = null;
-
 function updateLayoutAfterResize() {
-  resizeFrame = null;
   fitCanvasToContainer();
   updateFolderPathDisplay();
   if (cropDialog.open) {
@@ -1538,23 +1529,22 @@ function updateLayoutAfterResize() {
   }
 }
 
-window.addEventListener("resize", () => {
-  if (resizeFrame !== null) {
-    return;
-  }
-  resizeFrame = window.requestAnimationFrame(updateLayoutAfterResize);
-});
+const layoutResizeScheduler = createFrameScheduler(updateLayoutAfterResize);
+window.addEventListener("resize", layoutResizeScheduler.schedule);
 
 window.addEventListener(
   "pagehide",
   () => {
     libraryRequestGate.cancel();
+    sceneDrawScheduler.cancel();
+    layoutResizeScheduler.cancel();
     browserFiles.dispose();
     disposeAudioEffects();
     gauntletAnimation.dispose();
     timeGauntletAnimation.dispose();
     pdfService.disposeDocument(state.pdfDocument);
     window.removeEventListener("keydown", handleKeyboardShortcut);
+    window.removeEventListener("resize", layoutResizeScheduler.schedule);
   },
   { once: true },
 );
