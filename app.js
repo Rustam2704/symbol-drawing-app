@@ -2,6 +2,8 @@ import { getStroke } from "./vendor/perfect-freehand-package/package/dist/esm/in
 
 import { browserFiles } from "./web/browser-files.js";
 import { createAudioEffects } from "./modules/audio-effects.js";
+import { createSettingsStore, THEME_COLORS } from "./modules/app-settings.js";
+import { findAutoCropBox as findContentCropBox } from "./modules/auto-crop.js";
 import {
   clampPointToRect,
   fitFileCropPreview,
@@ -97,61 +99,7 @@ const { playPreparedDeleteSound, playReverseSound, stopDeleteSounds } = createAu
   reverseRate: 2,
 });
 
-function readSavedBoolean(key) {
-  try {
-    return localStorage.getItem(key) === "true";
-  } catch {
-    return false;
-  }
-}
-
-function saveBoolean(key, value) {
-  try {
-    localStorage.setItem(key, String(value));
-  } catch {
-    // Layout preference is nice to keep, but drawing should continue without storage.
-  }
-}
-
-function readSavedTheme() {
-  try {
-    const savedTheme = localStorage.getItem("symbolPracticeTheme");
-    return ["current", "dark", "violet", "sunset"].includes(savedTheme) ? savedTheme : "current";
-  } catch {
-    return "current";
-  }
-}
-
-const THEME_COLORS = {
-  current: {
-    paper: "#fbfaf7",
-    grid: "rgba(73, 68, 60, 0.16)",
-    guide: "rgba(35, 124, 107, 0.24)",
-    margin: "rgba(179, 52, 45, 0.18)",
-    pens: ["#1f1d1a", "#237c6b", "#b3342d"],
-  },
-  dark: {
-    paper: "#070707",
-    grid: "rgba(77, 77, 77, 0.28)",
-    guide: "rgba(77, 77, 77, 0.4)",
-    margin: "rgba(26, 26, 26, 0.65)",
-    pens: ["#b3b3b3", "#4d4d4d", "#1a1a1a"],
-  },
-  violet: {
-    paper: "#07052f",
-    grid: "rgba(51, 181, 224, 0.18)",
-    guide: "rgba(16, 192, 224, 0.4)",
-    margin: "rgba(145, 43, 145, 0.4)",
-    pens: ["#b8f4f2", "#10c0e0", "#922b91"],
-  },
-  sunset: {
-    paper: "#062c3c",
-    grid: "rgba(45, 139, 157, 0.22)",
-    guide: "rgba(78, 190, 188, 0.42)",
-    margin: "rgba(244, 132, 112, 0.42)",
-    pens: ["#ffe0aa", "#4ebebc", "#f48470"],
-  },
-};
+const settings = createSettingsStore();
 
 const state = {
   drawing: false,
@@ -183,8 +131,8 @@ const state = {
   cropRevisions: new Map(),
   penColor: "#1f1d1a",
   recentColors: ["#1f1d1a", "#237c6b", "#b3342d"],
-  theme: readSavedTheme(),
-  menusSwapped: readSavedBoolean("symbolPracticeMenusSwapped"),
+  theme: settings.readTheme(),
+  menusSwapped: settings.readBoolean("symbolPracticeMenusSwapped"),
   deleteEffects: [],
   deleteAnimationFrame: null,
 };
@@ -722,11 +670,7 @@ function setTheme(theme, { updatePen = true } = {}) {
       button.setAttribute("aria-pressed", String(isActive));
     });
 
-  try {
-    localStorage.setItem("symbolPracticeTheme", state.theme);
-  } catch {
-    // Theme persistence is optional.
-  }
+  settings.writeTheme(state.theme);
 
   if (updatePen) {
     const colors = THEME_COLORS[state.theme].pens;
@@ -1398,80 +1342,12 @@ function findAutoCropBox() {
   scratch.height = image.height;
   scratchContext.drawImage(image, 0, 0);
 
-  const { data } = scratchContext.getImageData(0, 0, scratch.width, scratch.height);
-  const samples = [
-    0,
-    (scratch.width - 1) * 4,
-    ((scratch.height - 1) * scratch.width) * 4,
-    ((scratch.height - 1) * scratch.width + scratch.width - 1) * 4,
-  ];
-  const transparentCorners = samples.filter((index) => data[index + 3] < 16).length >= 2;
-  const background = samples.reduce(
-    (acc, index) => {
-      acc.r += data[index];
-      acc.g += data[index + 1];
-      acc.b += data[index + 2];
-      return acc;
-    },
-    { r: 0, g: 0, b: 0 },
-  );
-  background.r /= samples.length;
-  background.g /= samples.length;
-  background.b /= samples.length;
-
-  let minX = scratch.width;
-  let minY = scratch.height;
-  let maxX = 0;
-  let maxY = 0;
-  let found = false;
-
-  for (let y = 0; y < scratch.height; y += 1) {
-    for (let x = 0; x < scratch.width; x += 1) {
-      const index = (y * scratch.width + x) * 4;
-      const alpha = data[index + 3];
-      let isForeground = alpha >= 16;
-
-      if (!transparentCorners) {
-        if (alpha < 16) {
-          continue;
-        }
-
-        const distance =
-          Math.abs(data[index] - background.r) +
-          Math.abs(data[index + 1] - background.g) +
-          Math.abs(data[index + 2] - background.b);
-        isForeground = distance >= 72;
-      }
-
-      if (!isForeground) {
-        continue;
-      }
-
-      found = true;
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
-    }
-  }
-
-  if (!found) {
-    return null;
-  }
-
-  const contentWidth = maxX - minX + 1;
-  const contentHeight = maxY - minY + 1;
-  const maxSide = Math.min(image.width + FILE_CROP_PADDING * 2, image.height + FILE_CROP_PADDING * 2);
-  const side = Math.min(Math.max(contentWidth, contentHeight) * 1.18, maxSide);
-  const centerX = (minX + maxX) / 2;
-  const centerY = (minY + maxY) / 2;
-
-  return {
-    x: Math.round(Math.min(Math.max(centerX - side / 2, -FILE_CROP_PADDING), image.width + FILE_CROP_PADDING - side)),
-    y: Math.round(Math.min(Math.max(centerY - side / 2, -FILE_CROP_PADDING), image.height + FILE_CROP_PADDING - side)),
-    width: Math.round(side),
-    height: Math.round(side),
-  };
+  return findContentCropBox({
+    data: scratchContext.getImageData(0, 0, scratch.width, scratch.height).data,
+    width: scratch.width,
+    height: scratch.height,
+    padding: FILE_CROP_PADDING,
+  });
 }
 
 function applyAutoCrop() {
@@ -1775,7 +1651,7 @@ undoButton.addEventListener("click", undoLastStroke);
 
 swapMenuButton.addEventListener("click", () => {
   state.menusSwapped = !state.menusSwapped;
-  saveBoolean("symbolPracticeMenusSwapped", state.menusSwapped);
+  settings.writeBoolean("symbolPracticeMenusSwapped", state.menusSwapped);
   updateMenuSwap();
   fitCanvasToContainer();
 });
