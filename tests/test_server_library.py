@@ -8,7 +8,7 @@ from urllib.request import urlopen
 from http.server import ThreadingHTTPServer
 
 from server import DrawingAppHandler
-from server_library import decode_image_data_url, make_item, resolve_named_file
+from server_library import decode_image_data_url, make_item, resolve_named_file, save_cropped_image
 
 
 class ServerLibraryTests(unittest.TestCase):
@@ -48,6 +48,28 @@ class ServerLibraryTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
+
+    def test_crop_save_replaces_png_atomically_and_archives_original(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            image = folder / "symbol.png"
+            image.write_bytes(b"original")
+            output, archived = save_cropped_image(folder, image, "image/png", b"cropped")
+            self.assertEqual(output, image)
+            self.assertEqual(output.read_bytes(), b"cropped")
+            self.assertEqual(archived.read_bytes(), b"original")
+            self.assertEqual(list(folder.glob(".*.tmp")), [])
+
+    def test_crop_save_changes_jpeg_to_png_after_successful_write(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            image = folder / "symbol.jpg"
+            image.write_bytes(b"jpeg")
+            output, archived = save_cropped_image(folder, image, "image/png", b"png")
+            self.assertEqual(output.name, "symbol.png")
+            self.assertEqual(output.read_bytes(), b"png")
+            self.assertFalse(image.exists())
+            self.assertEqual(archived.read_bytes(), b"jpeg")
 
 
 if __name__ == "__main__":

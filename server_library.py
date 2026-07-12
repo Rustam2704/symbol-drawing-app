@@ -1,8 +1,11 @@
 import base64
 import mimetypes
+import os
 import re
+import shutil
 from pathlib import Path
 from urllib.parse import quote, unquote
+from uuid import uuid4
 
 
 ROOT = Path(__file__).resolve().parent
@@ -58,3 +61,30 @@ def decode_image_data_url(data_url):
     if not content:
         raise ValueError("Cropped image is empty.")
     return match.group(1).lower(), content
+
+
+def save_cropped_image(folder, image_path, cropped_mime, cropped_bytes):
+    output_path = image_path
+    if image_path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+        output_path = image_path.with_suffix(".png")
+    elif cropped_mime == "image/png" and image_path.suffix.lower() != ".png":
+        output_path = image_path.with_suffix(".png")
+
+    if output_path != image_path and output_path.exists():
+        raise ValueError(f"Cropped PNG already exists: {output_path.name}")
+
+    old_dir = folder / "old"
+    old_dir.mkdir(parents=True, exist_ok=True)
+    archived_path = old_dir / image_path.name
+    shutil.copy2(image_path, archived_path)
+
+    temporary_path = output_path.with_name(f".{output_path.name}.{uuid4().hex}.tmp")
+    try:
+        temporary_path.write_bytes(cropped_bytes)
+        os.replace(temporary_path, output_path)
+        if output_path != image_path:
+            image_path.unlink()
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+    return output_path, archived_path

@@ -16,6 +16,7 @@ from server_library import (
     make_item,
     resolve_folder,
     resolve_named_file,
+    save_cropped_image,
 )
 
 PORT = int(os.environ.get("PORT", "5173"))
@@ -189,24 +190,9 @@ class DrawingAppHandler(SimpleHTTPRequestHandler):
 
             cropped_mime, cropped_bytes = decode_image_data_url(data_url)
 
-            old_dir = folder / "old"
-            old_dir.mkdir(parents=True, exist_ok=True)
-            archived_path = old_dir / image_path.name
-            shutil.copy2(str(image_path), str(archived_path))
-
-            output_path = image_path
-            if image_path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
-                output_path = image_path.with_suffix(".png")
-                if output_path.exists() and output_path != image_path:
-                    raise ValueError(f"Cropped PNG already exists: {output_path.name}")
-                image_path.unlink()
-            elif cropped_mime == "image/png" and image_path.suffix.lower() not in {".png"}:
-                output_path = image_path.with_suffix(".png")
-                if output_path.exists() and output_path != image_path:
-                    raise ValueError(f"Cropped PNG already exists: {output_path.name}")
-                image_path.unlink()
-
-            output_path.write_bytes(cropped_bytes)
+            output_path, archived_path = save_cropped_image(
+                folder, image_path, cropped_mime, cropped_bytes
+            )
             stat = output_path.stat()
             self.send_json(
                 200,
