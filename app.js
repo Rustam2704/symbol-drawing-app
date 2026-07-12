@@ -27,6 +27,7 @@ import {
 import { createLibraryApi } from "./modules/library-api.js";
 import { createLibraryRenderer } from "./modules/library-renderer.js";
 import { createMediaLoader } from "./modules/media-loader.js";
+import { createImageCropService } from "./modules/image-crop-service.js";
 import { createPdfService } from "./modules/pdf-service.js";
 import { createSpriteAnimation } from "./modules/sprite-animation.js";
 import { calculateRangePercent, normalizeColor, shortenMiddle } from "./modules/ui-utils.js";
@@ -794,6 +795,7 @@ const pdfService = createPdfService({
   canvasToImage: mediaLoader.fromCanvas,
 });
 const libraryApi = createLibraryApi({ createUrl: apiUrl });
+const imageCropService = createImageCropService();
 const libraryRenderer = createLibraryRenderer({
   container: libraryList,
   getItemUrl: versionedImageUrl,
@@ -1173,16 +1175,9 @@ function openFileCropDialog() {
 
 function findAutoCropBox() {
   const image = state.backgroundImage;
-  const scratch = document.createElement("canvas");
-  const scratchContext = scratch.getContext("2d", { willReadFrequently: true });
-  scratch.width = image.width;
-  scratch.height = image.height;
-  scratchContext.drawImage(image, 0, 0);
-
+  const pixels = imageCropService.readPixels(image);
   return findContentCropBox({
-    data: scratchContext.getImageData(0, 0, scratch.width, scratch.height).data,
-    width: scratch.width,
-    height: scratch.height,
+    ...pixels,
     padding: FILE_CROP_PADDING,
   });
 }
@@ -1199,48 +1194,6 @@ function applyAutoCrop() {
   drawFileCropPreview();
 }
 
-function cropImageToDataUrl(crop) {
-  const output = document.createElement("canvas");
-  const outputContext = output.getContext("2d");
-  output.width = crop.width;
-  output.height = crop.height;
-  const extension = state.sourceItem?.name.split(".").pop()?.toLowerCase();
-
-  if (extension === "jpg" || extension === "jpeg") {
-    outputContext.fillStyle = "#fff";
-    outputContext.fillRect(0, 0, output.width, output.height);
-  }
-
-  const sourceX = Math.max(0, crop.x);
-  const sourceY = Math.max(0, crop.y);
-  const sourceRight = Math.min(state.backgroundImage.width, crop.x + crop.width);
-  const sourceBottom = Math.min(state.backgroundImage.height, crop.y + crop.height);
-  const sourceWidth = Math.max(0, sourceRight - sourceX);
-  const sourceHeight = Math.max(0, sourceBottom - sourceY);
-
-  if (sourceWidth > 0 && sourceHeight > 0) {
-    outputContext.drawImage(
-      state.backgroundImage,
-      sourceX,
-      sourceY,
-      sourceWidth,
-      sourceHeight,
-      sourceX - crop.x,
-      sourceY - crop.y,
-      sourceWidth,
-      sourceHeight,
-    );
-  }
-
-  if (extension === "jpg" || extension === "jpeg") {
-    return output.toDataURL("image/jpeg", 0.96);
-  }
-  if (extension === "webp") {
-    return output.toDataURL("image/webp", 0.96);
-  }
-  return output.toDataURL("image/png");
-}
-
 async function saveFileCrop() {
   if (!canCropSourceItem(state.sourceItem) || !fileCropState.selection) {
     return;
@@ -1255,7 +1208,11 @@ async function saveFileCrop() {
   autoCropButton.disabled = true;
 
   try {
-    const dataUrl = cropImageToDataUrl(crop);
+    const dataUrl = imageCropService.cropToDataUrl(
+      state.backgroundImage,
+      crop,
+      state.sourceItem.name,
+    );
     if (state.fileSource === "browser") {
       const saved = await browserFiles.saveCrop(state.sourceItem, dataUrl);
       fileCropState.selection = null;
