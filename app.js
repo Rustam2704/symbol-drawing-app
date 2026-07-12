@@ -23,7 +23,11 @@ import { cloneStrokes, createHistory } from "./modules/history.js";
 import {
   canCropSourceItem,
   createApiUrl as apiUrl,
+  createVersionedImageUrl,
+  findLibraryItemForFile,
   getFolderFromSelectedFile,
+  getLibraryItemKey,
+  parseDirectoryListing,
   sortLibraryItems,
 } from "./modules/library-utils.js";
 import { createLibraryApi } from "./modules/library-api.js";
@@ -31,6 +35,7 @@ import { createLibraryRenderer } from "./modules/library-renderer.js";
 import { createMediaLoader } from "./modules/media-loader.js";
 import { createImageCropService } from "./modules/image-crop-service.js";
 import { createPdfService } from "./modules/pdf-service.js";
+import { createRequestGate } from "./modules/request-gate.js";
 import { createSpriteAnimation } from "./modules/sprite-animation.js";
 import { calculateRangePercent, normalizeColor, shortenMiddle } from "./modules/ui-utils.js";
 
@@ -624,33 +629,6 @@ function updateFileCropButton() {
   fileCropButton.disabled = !state.backgroundImage || !canCropSourceItem(state.sourceItem) || browserReadOnly;
 }
 
-function versionedImageUrl(item) {
-  if (item.source === "browser") {
-    return item.url;
-  }
-  const fileVersion = `${item.mtime || 0}-${item.size || 0}`;
-  const cropRevision = state.cropRevisions.get(getItemKey(item)) || 0;
-  const version = `${fileVersion}-${cropRevision}`;
-  const separator = item.url.includes("?") ? "&" : "?";
-  return `${item.url}${separator}v=${encodeURIComponent(version)}`;
-}
-
-function findLibraryItemForFile(file) {
-  if (!file || file.name.toLowerCase().endsWith(".pdf")) {
-    return null;
-  }
-
-  return (
-    state.libraryItems.find(
-      (item) => item.type === "image" && item.name.toLowerCase() === file.name.toLowerCase(),
-    ) || null
-  );
-}
-
-function getItemKey(item) {
-  return `${item.folder || state.libraryFolder || ""}\\${item.name}`;
-}
-
 function getFolderPathTextWidth(text) {
   const measuringCanvas = getFolderPathTextWidth.canvas || document.createElement("canvas");
   getFolderPathTextWidth.canvas = measuringCanvas;
@@ -797,10 +775,11 @@ const pdfService = createPdfService({
   canvasToImage: mediaLoader.fromCanvas,
 });
 const libraryApi = createLibraryApi({ createUrl: apiUrl });
+const libraryRequestGate = createRequestGate();
 const imageCropService = createImageCropService();
 const libraryRenderer = createLibraryRenderer({
   container: libraryList,
-  getItemUrl: versionedImageUrl,
+  getItemUrl: (item) => createVersionedImageUrl(item, state.cropRevisions, state.libraryFolder),
   onSelectItem: loadLibraryItem,
   onSelectPdfPage: setPdfPage,
   renderPdfThumbnail,
@@ -850,7 +829,7 @@ async function loadImage(file) {
     if (selectedFolder) {
       await loadLibrary(selectedFolder);
     }
-    state.sourceItem = findLibraryItemForFile(file);
+    state.sourceItem = findLibraryItemForFile(file, state.libraryItems);
     updateFileCropButton();
   } catch (error) {
     window.alert(error.message);
@@ -954,7 +933,7 @@ async function loadLibraryItem(item) {
     applyLoadedBackground(
       item.source === "browser"
         ? await mediaLoader.fromFile(await browserFiles.getFile(item))
-        : await mediaLoader.fromSource(versionedImageUrl(item)),
+        : await mediaLoader.fromSource(createVersionedImageUrl(item, state.cropRevisions, state.libraryFolder)),
     );
   } catch (error) {
     cropButton.disabled = false;
@@ -1168,7 +1147,8 @@ async function saveFileCrop() {
       dataUrl,
     });
 
-    const nextRevision = (state.cropRevisions.get(getItemKey(state.sourceItem)) || 0) + 1;
+    const nextRevision =
+      (state.cropRevisions.get(getLibraryItemKey(state.sourceItem, state.libraryFolder)) || 0) + 1;
     state.sourceItem = {
       ...state.sourceItem,
       name: payload.name || state.sourceItem.name,
@@ -1177,8 +1157,13 @@ async function saveFileCrop() {
       mtime: payload.mtime || state.sourceItem.mtime,
       size: payload.size || state.sourceItem.size,
     };
-    state.cropRevisions.set(getItemKey(state.sourceItem), nextRevision);
-    state.backgroundImage = await mediaLoader.fromSource(versionedImageUrl(state.sourceItem));
+    state.cropRevisions.set(
+      getLibraryItemKey(state.sourceItem, state.libraryFolder),
+      nextRevision,
+    );
+    state.backgroundImage = await mediaLoader.fromSource(
+      createVersionedImageUrl(state.sourceItem, state.cropRevisions, state.libraryFolder),
+    );
     state.crop = null;
     fileCropState.selection = null;
     fileCropDialog.close();
@@ -1226,31 +1211,13 @@ function renderLibrary() {
   libraryRenderer.renderItems(items);
 }
 
-function readDirectoryListing(html) {
-  const documentFragment = new DOMParser().parseFromString(html, "text/html");
-  const allowed = /\.(png|jpe?g|webp|ico|avif|gif|svg|pdf)$/i;
-
-  return Array.from(documentFragment.querySelectorAll("a"))
-    .map((link) => decodeURIComponent(link.getAttribute("href") || ""))
-    .filter((href) => allowed.test(href))
-    .map((href) => {
-      const name = href.replace(/\/$/, "").split("/").pop();
-      const isPdf = /\.pdf$/i.test(name);
-      return {
-        name,
-        folder: state.libraryFolder,
-        url: apiUrl("/api/file", { dir: state.libraryFolder, name }),
-        type: isPdf ? "pdf" : "image",
-        mtime: 0,
-      };
-    });
-}
-
 async function loadLibrary(folder = state.libraryFolder) {
+  const request = libraryRequestGate.begin();
   setLibraryMode("folder");
   if (state.fileSource === "browser" && browserFiles.isActive()) {
     libraryList.innerHTML = '<div class="library-empty">Scanning images...</div>';
-    applyBrowserLibrary(await browserFiles.scan());
+    const result = await browserFiles.scan();
+    if (request.isCurrent()) applyBrowserLibrary(result);
     return;
   }
   if (folder) {
@@ -1260,16 +1227,24 @@ async function loadLibrary(folder = state.libraryFolder) {
   libraryList.innerHTML = '<div class="library-empty">Scanning images...</div>';
 
   try {
-    const payload = await libraryApi.listImages(state.libraryFolder);
+    const payload = await libraryApi.listImages(state.libraryFolder, { signal: request.signal });
+    if (!request.isCurrent()) return;
     state.libraryFolder = payload.folder || state.libraryFolder;
     state.libraryItems = payload.items || [];
     state.fileSource = "local";
     folderPathInput.readOnly = false;
     chooseFileButton.textContent = "Choose image or PDF";
   } catch (error) {
+    if (!request.isCurrent() || error.name === "AbortError") return;
     try {
-      state.libraryItems = readDirectoryListing(await libraryApi.readDefaultDirectory());
+      const html = await libraryApi.readDefaultDirectory({ signal: request.signal });
+      if (!request.isCurrent()) return;
+      state.libraryItems = parseDirectoryListing(html, {
+        folder: state.libraryFolder,
+        createUrl: apiUrl,
+      });
     } catch (fallbackError) {
+      if (!request.isCurrent() || fallbackError.name === "AbortError") return;
       state.libraryItems = [];
       state.fileSource = "browser";
       folderPathInput.readOnly = true;
@@ -1564,7 +1539,14 @@ window.addEventListener("resize", () => {
   resizeFrame = window.requestAnimationFrame(updateLayoutAfterResize);
 });
 
-window.addEventListener("pagehide", () => browserFiles.dispose(), { once: true });
+window.addEventListener(
+  "pagehide",
+  () => {
+    libraryRequestGate.cancel();
+    browserFiles.dispose();
+  },
+  { once: true },
+);
 
 window.addEventListener("keydown", (event) => {
   const target = event.target;

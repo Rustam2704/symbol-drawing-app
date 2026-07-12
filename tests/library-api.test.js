@@ -31,7 +31,7 @@ test("listImages delegates URL creation and returns JSON", async () => {
   });
   assert.deepEqual(await api.listImages("images"), { folder: "images", items: [] });
   assert.equal(calls[0][0], "/api/images?dir=images");
-  assert.deepEqual(calls[0][1], { cache: "no-store" });
+  assert.deepEqual(calls[0][1], { cache: "no-store", signal: undefined });
 });
 
 test("cropImage sends JSON and surfaces server errors", async () => {

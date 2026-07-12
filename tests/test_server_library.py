@@ -2,7 +2,12 @@ import base64
 import tempfile
 import unittest
 from pathlib import Path
+from threading import Thread
+from urllib.request import urlopen
 
+from http.server import ThreadingHTTPServer
+
+from server import DrawingAppHandler
 from server_library import decode_image_data_url, make_item, resolve_named_file
 
 
@@ -31,6 +36,18 @@ class ServerLibraryTests(unittest.TestCase):
         self.assertEqual(content, b"image")
         with self.assertRaisesRegex(ValueError, "Invalid cropped image data"):
             decode_image_data_url("not-data")
+
+    def test_static_source_files_require_revalidation(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), DrawingAppHandler)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with urlopen(f"http://127.0.0.1:{server.server_port}/app.js") as response:
+                self.assertEqual(response.headers.get("Cache-Control"), "no-cache")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
 
 if __name__ == "__main__":

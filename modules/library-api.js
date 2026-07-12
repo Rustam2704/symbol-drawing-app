@@ -22,10 +22,10 @@ export function createLibraryApi({ createUrl, fetchImpl = fetch }) {
       );
     },
 
-    async listImages(folder) {
+    async listImages(folder, { signal } = {}) {
       return requestJson(
         createUrl("/api/images", { dir: folder }),
-        { cache: "no-store" },
+        { cache: "no-store", signal },
         "API unavailable",
       );
     },
@@ -50,8 +50,8 @@ export function createLibraryApi({ createUrl, fetchImpl = fetch }) {
       return response.arrayBuffer();
     },
 
-    async readDefaultDirectory() {
-      const response = await fetchImpl("/images/", { cache: "no-store" });
+    async readDefaultDirectory({ signal } = {}) {
+      const response = await fetchImpl("/images/", { cache: "no-store", signal });
       if (!response.ok) {
         throw new Error(`Folder listing unavailable (${response.status})`);
       }

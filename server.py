@@ -25,6 +25,12 @@ class DrawingAppHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
+    def end_headers(self):
+        static_path = urlparse(self.path).path.lower()
+        if static_path.endswith((".html", ".css", ".js", ".mjs")):
+            self.send_header("Cache-Control", "no-cache")
+        super().end_headers()
+
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == "/api/images":
