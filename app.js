@@ -3,6 +3,12 @@ import { getStroke } from "./vendor/perfect-freehand-package/package/dist/esm/in
 import { browserFiles } from "./web/browser-files.js";
 import { createAudioEffects } from "./modules/audio-effects.js";
 import { cloneStrokes, createHistory } from "./modules/history.js";
+import {
+  canCropSourceItem,
+  createApiUrl as apiUrl,
+  getFolderFromSelectedFile,
+  sortLibraryItems,
+} from "./modules/library-utils.js";
 
 const appShell = document.querySelector(".app-shell");
 const canvas = document.querySelector("#practiceCanvas");
@@ -243,7 +249,7 @@ const state = {
   deleteAnimationFrame: null,
 };
 
-const history = createHistory({ limit: 50 });
+const history = createHistory({ limit: 20 });
 
 function recordHistory(kind) {
   const node = history.record(kind, state.strokes);
@@ -252,10 +258,6 @@ function recordHistory(kind) {
 }
 
 const FILE_CROP_PADDING = 40;
-const nameCollator =
-  typeof Intl !== "undefined" && Intl.Collator
-    ? new Intl.Collator("zh-u-co-pinyin", { numeric: true, sensitivity: "base" })
-    : null;
 
 const cropState = {
   selecting: false,
@@ -411,20 +413,6 @@ function drawStroke(stroke) {
   }
 }
 
-const freehandOutlineCache = new WeakMap();
-
-function getFreehandOutline(stroke, options) {
-  const cached = freehandOutlineCache.get(stroke);
-  if (cached?.pointCount === stroke.points.length) {
-    return cached.outline;
-  }
-
-  const inputPoints = stroke.points.map((point) => [point.x, point.y, point.pressure || 0.5]);
-  const outline = getStroke(inputPoints, options);
-  freehandOutlineCache.set(stroke, { pointCount: stroke.points.length, outline });
-  return outline;
-}
-
 function drawFreehandStroke(stroke) {
   if (!stroke.points.length) {
     return;
@@ -432,7 +420,8 @@ function drawFreehandStroke(stroke) {
 
   const baseSize = Math.max(1, stroke.size || state.penSize * (window.devicePixelRatio || 1));
   const options = getFreehandOptions(stroke.type, baseSize);
-  const outline = getFreehandOutline(stroke, options);
+  const inputPoints = stroke.points.map((point) => [point.x, point.y, point.pressure || 0.5]);
+  const outline = getStroke(inputPoints, options);
 
   context.save();
   context.fillStyle = stroke.color;
@@ -916,18 +905,6 @@ function updateCanvasCursor(isPanning) {
   canvas.style.cursor = "crosshair";
 }
 
-function canCropSourceItem(item) {
-  return item?.type === "image" && /\.(png|jpe?g|webp|ico|avif|gif|svg)$/i.test(item.name);
-}
-
-function compareNames(a, b) {
-  if (nameCollator) {
-    return nameCollator.compare(a, b);
-  }
-
-  return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
-}
-
 function updateFileCropButton() {
   const browserReadOnly = state.fileSource === "browser" && !browserFiles.canWrite();
   fileCropButton.disabled = !state.backgroundImage || !canCropSourceItem(state.sourceItem) || browserReadOnly;
@@ -958,25 +935,6 @@ function findLibraryItemForFile(file) {
 
 function getItemKey(item) {
   return `${item.folder || state.libraryFolder || ""}\\${item.name}`;
-}
-
-function apiUrl(path, params = {}) {
-  const url = new URL(path, window.location.origin);
-  Object.entries(params).forEach(([key, value]) => {
-    if (value) {
-      url.searchParams.set(key, value);
-    }
-  });
-  return `${url.pathname}${url.search}`;
-}
-
-function getFolderFromSelectedFile(file) {
-  const rawPath = file?.path || file?.mozFullPath || "";
-  if (!rawPath || !/[\\\/]/.test(rawPath)) {
-    return "";
-  }
-
-  return rawPath.replace(/[\\\/][^\\\/]*$/, "");
 }
 
 function getFolderPathTextWidth(text) {
@@ -2009,25 +1967,10 @@ async function renderPdfThumbnail(pageNumber, targetCanvas) {
   }
 }
 
-function sortLibraryItems(items) {
-  const sorted = [...items];
-
-  if (state.librarySort === "name") {
-    sorted.sort((a, b) => compareNames(a.name, b.name));
-    return sorted;
-  }
-
-  sorted.sort((a, b) => {
-    const dateDelta = (b.mtime || 0) - (a.mtime || 0);
-    return dateDelta || compareNames(a.name, b.name);
-  });
-  return sorted;
-}
-
 function renderLibrary() {
   setLibraryMode("folder");
   updateFolderPathDisplay();
-  const items = sortLibraryItems(state.libraryItems);
+  const items = sortLibraryItems(state.libraryItems, state.librarySort);
   libraryList.innerHTML = "";
   sortByDateButton.classList.toggle("active", state.librarySort === "date");
   sortByNameButton.classList.toggle("active", state.librarySort === "name");
@@ -2372,7 +2315,10 @@ canvas.addEventListener("pointerup", stopDrawing);
 canvas.addEventListener("pointercancel", stopDrawing);
 canvas.addEventListener("lostpointercapture", stopDrawing);
 
-window.addEventListener("resize", () => {
+let resizeFrame = null;
+
+function updateLayoutAfterResize() {
+  resizeFrame = null;
   fitCanvasToContainer();
   updateFolderPathDisplay();
   if (cropDialog.open) {
@@ -2389,6 +2335,13 @@ window.addEventListener("resize", () => {
     }
     drawFileCropPreview();
   }
+}
+
+window.addEventListener("resize", () => {
+  if (resizeFrame !== null) {
+    return;
+  }
+  resizeFrame = window.requestAnimationFrame(updateLayoutAfterResize);
 });
 
 window.addEventListener("keydown", (event) => {
