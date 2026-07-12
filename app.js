@@ -2,6 +2,7 @@ import { getStroke } from "./vendor/perfect-freehand-package/package/dist/esm/in
 
 import { browserFiles } from "./web/browser-files.js";
 import { createAudioEffects } from "./modules/audio-effects.js";
+import { queryAppElements } from "./modules/app-elements.js";
 import { fillCanvas, renderImageContained, resizeCanvasToDisplaySize } from "./modules/canvas-utils.js";
 import { createSettingsStore, THEME_COLORS } from "./modules/app-settings.js";
 import { findAutoCropBox as findContentCropBox } from "./modules/auto-crop.js";
@@ -39,55 +40,57 @@ import { createRequestGate } from "./modules/request-gate.js";
 import { createSpriteAnimation } from "./modules/sprite-animation.js";
 import { calculateRangePercent, normalizeColor, shortenMiddle } from "./modules/ui-utils.js";
 
-const appShell = document.querySelector(".app-shell");
-const canvas = document.querySelector("#practiceCanvas");
+const {
+  appShell,
+  canvas,
+  clearButton,
+  gauntletCanvas,
+  undoButton,
+  timeGauntletCanvas,
+  swapMenuButton,
+  currentThemeButton,
+  darkThemeButton,
+  violetThemeButton,
+  sunsetThemeButton,
+  chooseFileButton,
+  penSizeInput,
+  backgroundOpacityInput,
+  backgroundScaleInput,
+  penSizeValue,
+  backgroundOpacityValue,
+  backgroundScaleValue,
+  gridToggle,
+  backgroundToggle,
+  pointerModeButton,
+  handModeButton,
+  brushModeButton,
+  pressureModeButton,
+  cropButton,
+  fileCropButton,
+  cropDialog,
+  cropCanvas,
+  applyCropButton,
+  resetCropButton,
+  closeCropButton,
+  fileCropDialog,
+  fileCropCanvas,
+  closeFileCropButton,
+  autoCropButton,
+  applyFileCropButton,
+  libraryTitle,
+  folderPathInput,
+  libraryList,
+  refreshLibraryButton,
+  sortByDateButton,
+  sortByNameButton,
+  colorSwatches,
+  colorPickerButton,
+  colorPickerInput,
+  rangeInputs,
+} = queryAppElements(document);
 const context = canvas.getContext("2d");
-const clearButton = document.querySelector("#clearButton");
-const gauntletCanvas = document.querySelector("#gauntletAnimation");
-const undoButton = document.querySelector("#undoButton");
-const timeGauntletCanvas = document.querySelector("#timeGauntletAnimation");
-const swapMenuButton = document.querySelector("#swapMenuButton");
-const currentThemeButton = document.querySelector("#currentThemeButton");
-const darkThemeButton = document.querySelector("#darkThemeButton");
-const violetThemeButton = document.querySelector("#violetThemeButton");
-const sunsetThemeButton = document.querySelector("#sunsetThemeButton");
-const chooseFileButton = document.querySelector("#chooseFileButton");
-const penSizeInput = document.querySelector("#penSize");
-const backgroundOpacityInput = document.querySelector("#backgroundOpacity");
-const backgroundScaleInput = document.querySelector("#backgroundScale");
-const penSizeValue = document.querySelector("#penSizeValue");
-const backgroundOpacityValue = document.querySelector("#backgroundOpacityValue");
-const backgroundScaleValue = document.querySelector("#backgroundScaleValue");
-const gridToggle = document.querySelector("#gridToggle");
-const backgroundToggle = document.querySelector("#backgroundToggle");
-const pointerModeButton = document.querySelector("#pointerModeButton");
-const handModeButton = document.querySelector("#handModeButton");
-const brushModeButton = document.querySelector("#brushModeButton");
-const cropButton = document.querySelector("#cropButton");
-const fileCropButton = document.querySelector("#fileCropButton");
-const cropDialog = document.querySelector("#cropDialog");
-const cropCanvas = document.querySelector("#cropCanvas");
 const cropContext = cropCanvas.getContext("2d");
-const applyCropButton = document.querySelector("#applyCropButton");
-const resetCropButton = document.querySelector("#resetCropButton");
-const closeCropButton = document.querySelector("#closeCropButton");
-const fileCropDialog = document.querySelector("#fileCropDialog");
-const fileCropCanvas = document.querySelector("#fileCropCanvas");
 const fileCropContext = fileCropCanvas.getContext("2d");
-const closeFileCropButton = document.querySelector("#closeFileCropButton");
-const autoCropButton = document.querySelector("#autoCropButton");
-const applyFileCropButton = document.querySelector("#applyFileCropButton");
-const libraryTitle = document.querySelector("#libraryTitle");
-const folderPathInput = document.querySelector("#folderPathInput");
-const libraryList = document.querySelector("#libraryList");
-const refreshLibraryButton = document.querySelector("#refreshLibraryButton");
-const sortByDateButton = document.querySelector("#sortByDateButton");
-const sortByNameButton = document.querySelector("#sortByNameButton");
-const pressureModeButton = document.querySelector("#pressureModeButton");
-const colorSwatches = Array.from(document.querySelectorAll(".color-swatch[data-color-index]"));
-const colorPickerButton = document.querySelector("#colorPickerButton");
-const colorPickerInput = document.querySelector("#colorPickerInput");
-const rangeInputs = Array.from(document.querySelectorAll('input[type="range"]'));
 
 const GAUNTLET_FRAME_SIZE = 80;
 const GAUNTLET_FRAME_COUNT = 48;
