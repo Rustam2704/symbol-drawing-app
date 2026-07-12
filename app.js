@@ -24,6 +24,7 @@ import {
   sortLibraryItems,
 } from "./modules/library-utils.js";
 import { createLibraryApi } from "./modules/library-api.js";
+import { createLibraryRenderer } from "./modules/library-renderer.js";
 import { createMediaLoader } from "./modules/media-loader.js";
 import { createPdfService } from "./modules/pdf-service.js";
 import { createSpriteAnimation } from "./modules/sprite-animation.js";
@@ -918,6 +919,13 @@ const pdfService = createPdfService({
   canvasToImage: mediaLoader.fromCanvas,
 });
 const libraryApi = createLibraryApi({ createUrl: apiUrl });
+const libraryRenderer = createLibraryRenderer({
+  container: libraryList,
+  getItemUrl: versionedImageUrl,
+  onSelectItem: loadLibraryItem,
+  onSelectPdfPage: setPdfPage,
+  renderPdfThumbnail,
+});
 
 async function loadImage(file) {
   if (!file) {
@@ -1424,38 +1432,7 @@ function showPdfPages() {
 
 function renderPdfPages() {
   setLibraryMode("pdf");
-  libraryList.innerHTML = "";
-
-  if (!state.pdfPages.length) {
-    const empty = document.createElement("div");
-    empty.className = "library-empty";
-    empty.textContent = "No PDF pages found.";
-    libraryList.append(empty);
-    return;
-  }
-
-  const fragment = document.createDocumentFragment();
-  const thumbnails = [];
-  for (const pageNumber of state.pdfPages) {
-    const button = document.createElement("button");
-    button.className = "library-item";
-    button.type = "button";
-    button.title = `Page ${pageNumber}`;
-    button.addEventListener("click", () => setPdfPage(pageNumber));
-
-    const thumb = document.createElement("canvas");
-    thumb.className = "library-page-thumb";
-    button.append(thumb);
-
-    const name = document.createElement("span");
-    name.className = "library-name";
-    name.textContent = `Page ${pageNumber}`;
-    button.append(name);
-    fragment.append(button);
-    thumbnails.push([pageNumber, thumb]);
-  }
-  libraryList.append(fragment);
-  thumbnails.forEach(([pageNumber, thumb]) => renderPdfThumbnail(pageNumber, thumb));
+  libraryRenderer.renderPdfPages(state.pdfPages);
 }
 
 async function renderPdfThumbnail(pageNumber, targetCanvas) {
@@ -1493,46 +1470,9 @@ function renderLibrary() {
   setLibraryMode("folder");
   updateFolderPathDisplay();
   const items = sortLibraryItems(state.libraryItems, state.librarySort);
-  libraryList.innerHTML = "";
   sortByDateButton.classList.toggle("active", state.librarySort === "date");
   sortByNameButton.classList.toggle("active", state.librarySort === "name");
-
-  if (!items.length) {
-    const empty = document.createElement("div");
-    empty.className = "library-empty";
-    empty.textContent = "No images found in the images folder.";
-    libraryList.append(empty);
-    return;
-  }
-
-  const fragment = document.createDocumentFragment();
-  for (const item of items) {
-    const button = document.createElement("button");
-    button.className = "library-item";
-    button.type = "button";
-    button.title = item.name;
-    button.addEventListener("click", () => loadLibraryItem(item));
-
-    if (item.type === "pdf") {
-      const thumb = document.createElement("div");
-      thumb.className = "library-pdf-thumb";
-      thumb.textContent = "PDF";
-      button.append(thumb);
-    } else {
-      const image = document.createElement("img");
-      image.src = versionedImageUrl(item);
-      image.alt = "";
-      image.loading = "lazy";
-      button.append(image);
-    }
-
-    const name = document.createElement("span");
-    name.className = "library-name";
-    name.textContent = item.name.replace(/\.[^.]+$/, "");
-    button.append(name);
-    fragment.append(button);
-  }
-  libraryList.append(fragment);
+  libraryRenderer.renderItems(items);
 }
 
 function readDirectoryListing(html) {
