@@ -5,6 +5,36 @@ export function cloneStrokes(strokes) {
   }));
 }
 
+function strokesEqual(source, snapshot) {
+  const sourceKeys = Object.keys(source).filter((key) => key !== "points");
+  const snapshotKeys = Object.keys(snapshot).filter((key) => key !== "points");
+  if (sourceKeys.length !== snapshotKeys.length || source.points.length !== snapshot.points.length) {
+    return false;
+  }
+  if (sourceKeys.some((key) => source[key] !== snapshot[key])) {
+    return false;
+  }
+  return source.points.every((point, index) => {
+    const snapshotPoint = snapshot.points[index];
+    const pointKeys = Object.keys(point);
+    const snapshotPointKeys = Object.keys(snapshotPoint);
+    return (
+      pointKeys.length === snapshotPointKeys.length &&
+      pointKeys.every((key) => point[key] === snapshotPoint[key])
+    );
+  });
+}
+
+function createSnapshot(strokes, previousSnapshot) {
+  return strokes.map((stroke, index) => {
+    const previousStroke = previousSnapshot[index];
+    if (previousStroke && strokesEqual(stroke, previousStroke)) {
+      return previousStroke;
+    }
+    return cloneStrokes([stroke])[0];
+  });
+}
+
 export function createHistory({ limit = 20 } = {}) {
   const root = {
     id: 0,
@@ -85,7 +115,7 @@ export function createHistory({ limit = 20 } = {}) {
       const node = {
         id: nextId,
         kind,
-        strokes: cloneStrokes(strokes),
+        strokes: createSnapshot(strokes, current.strokes),
         parent: current,
         children: [],
       };

@@ -35,3 +35,16 @@ test("recorded snapshots do not change when source strokes mutate", () => {
   strokes[0].points[0].x = 10;
   assert.equal(node.strokes[0].points[0].x, 3);
 });
+
+test("unchanged strokes share snapshot data while changed strokes are copied", () => {
+  const history = createHistory();
+  const firstStroke = stroke(1)[0];
+  const firstNode = history.record("draw", [firstStroke]);
+  const secondNode = history.record("draw", [firstStroke, stroke(2)[0]]);
+  assert.equal(secondNode.strokes[0], firstNode.strokes[0]);
+
+  firstStroke.points[0].x = 7;
+  const thirdNode = history.record("draw", [firstStroke]);
+  assert.notEqual(thirdNode.strokes[0], secondNode.strokes[0]);
+  assert.equal(thirdNode.strokes[0].points[0].x, 7);
+});

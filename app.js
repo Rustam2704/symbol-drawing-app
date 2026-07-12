@@ -13,6 +13,7 @@ import {
   previewRectToImageCrop,
   previewSquareToImageCrop,
 } from "./modules/crop-geometry.js";
+import { createDeleteMotionMap, packDeleteParticles } from "./modules/delete-particles.js";
 import { cloneStrokes, createHistory } from "./modules/history.js";
 import {
   canCropSourceItem,
@@ -20,17 +21,17 @@ import {
   getFolderFromSelectedFile,
   sortLibraryItems,
 } from "./modules/library-utils.js";
+import { createLibraryApi } from "./modules/library-api.js";
 import { createPdfService } from "./modules/pdf-service.js";
+import { createSpriteAnimation } from "./modules/sprite-animation.js";
 
 const appShell = document.querySelector(".app-shell");
 const canvas = document.querySelector("#practiceCanvas");
 const context = canvas.getContext("2d");
 const clearButton = document.querySelector("#clearButton");
 const gauntletCanvas = document.querySelector("#gauntletAnimation");
-const gauntletContext = gauntletCanvas.getContext("2d");
 const undoButton = document.querySelector("#undoButton");
 const timeGauntletCanvas = document.querySelector("#timeGauntletAnimation");
-const timeGauntletContext = timeGauntletCanvas.getContext("2d");
 const swapMenuButton = document.querySelector("#swapMenuButton");
 const currentThemeButton = document.querySelector("#currentThemeButton");
 const darkThemeButton = document.querySelector("#darkThemeButton");
@@ -77,97 +78,24 @@ const rangeInputs = Array.from(document.querySelectorAll('input[type="range"]'))
 const GAUNTLET_FRAME_SIZE = 80;
 const GAUNTLET_FRAME_COUNT = 48;
 const GAUNTLET_FRAME_DURATION = 10;
-const gauntletSprite = new Image();
-const timeGauntletSprite = new Image();
-let gauntletAnimationTimer = null;
-let timeGauntletAnimationTimer = null;
-let gauntletAnimationPending = false;
-let timeGauntletAnimationPending = false;
+const gauntletAnimation = createSpriteAnimation({
+  canvas: gauntletCanvas,
+  source: "./assets/thanos_snap.png",
+  frameSize: GAUNTLET_FRAME_SIZE,
+  frameCount: GAUNTLET_FRAME_COUNT,
+  frameDuration: GAUNTLET_FRAME_DURATION,
+});
+const timeGauntletAnimation = createSpriteAnimation({
+  canvas: timeGauntletCanvas,
+  source: "./assets/thanos_time.png",
+  frameSize: GAUNTLET_FRAME_SIZE,
+  frameCount: GAUNTLET_FRAME_COUNT,
+  frameDuration: GAUNTLET_FRAME_DURATION,
+});
 const { playPreparedDeleteSound, playReverseSound, stopDeleteSounds } = createAudioEffects({
   deleteRate: 2,
   reverseRate: 2,
 });
-
-function drawSpriteFrame(sprite, targetContext, frame) {
-  targetContext.clearRect(0, 0, GAUNTLET_FRAME_SIZE, GAUNTLET_FRAME_SIZE);
-  targetContext.drawImage(
-    sprite,
-    frame * GAUNTLET_FRAME_SIZE,
-    0,
-    GAUNTLET_FRAME_SIZE,
-    GAUNTLET_FRAME_SIZE,
-    0,
-    0,
-    GAUNTLET_FRAME_SIZE,
-    GAUNTLET_FRAME_SIZE,
-  );
-}
-
-function playGauntletAnimation() {
-  if (!gauntletSprite.complete || !gauntletSprite.naturalWidth) {
-    gauntletAnimationPending = true;
-    return;
-  }
-
-  gauntletAnimationPending = false;
-  if (gauntletAnimationTimer !== null) {
-    clearInterval(gauntletAnimationTimer);
-  }
-
-  let frame = 0;
-  drawSpriteFrame(gauntletSprite, gauntletContext, frame);
-  gauntletAnimationTimer = setInterval(() => {
-    frame += 1;
-    if (frame >= GAUNTLET_FRAME_COUNT) {
-      clearInterval(gauntletAnimationTimer);
-      gauntletAnimationTimer = null;
-      drawSpriteFrame(gauntletSprite, gauntletContext, 0);
-      return;
-    }
-    drawSpriteFrame(gauntletSprite, gauntletContext, frame);
-  }, GAUNTLET_FRAME_DURATION);
-}
-
-function playTimeGauntletAnimation() {
-  if (!timeGauntletSprite.complete || !timeGauntletSprite.naturalWidth) {
-    timeGauntletAnimationPending = true;
-    return;
-  }
-
-  timeGauntletAnimationPending = false;
-  if (timeGauntletAnimationTimer !== null) {
-    clearInterval(timeGauntletAnimationTimer);
-  }
-
-  let frame = 0;
-  drawSpriteFrame(timeGauntletSprite, timeGauntletContext, frame);
-  timeGauntletAnimationTimer = setInterval(() => {
-    frame += 1;
-    if (frame >= GAUNTLET_FRAME_COUNT) {
-      clearInterval(timeGauntletAnimationTimer);
-      timeGauntletAnimationTimer = null;
-      drawSpriteFrame(timeGauntletSprite, timeGauntletContext, 0);
-      return;
-    }
-    drawSpriteFrame(timeGauntletSprite, timeGauntletContext, frame);
-  }, GAUNTLET_FRAME_DURATION);
-}
-
-gauntletSprite.addEventListener("load", () => {
-  drawSpriteFrame(gauntletSprite, gauntletContext, 0);
-  if (gauntletAnimationPending) {
-    playGauntletAnimation();
-  }
-});
-gauntletSprite.src = "./assets/thanos_snap.png";
-
-timeGauntletSprite.addEventListener("load", () => {
-  drawSpriteFrame(timeGauntletSprite, timeGauntletContext, 0);
-  if (timeGauntletAnimationPending) {
-    playTimeGauntletAnimation();
-  }
-});
-timeGauntletSprite.src = "./assets/thanos_time.png";
 
 function readSavedBoolean(key) {
   try {
@@ -516,33 +444,14 @@ let deleteMotionMap = null;
 const deleteMaskCanvas = document.createElement("canvas");
 const deleteMaskContext = deleteMaskCanvas.getContext("2d", { willReadFrequently: true });
 
-function deterministicNoise(index, salt) {
-  const value = Math.sin(index * 12.9898 + salt * 78.233) * 43758.5453;
-  return value - Math.floor(value);
-}
-
 function getDeleteMotionMap() {
   const pixelRatio = window.devicePixelRatio || 1;
   const particleSize = Math.max(2, Math.round(pixelRatio * 1.35));
-  const columns = Math.ceil(canvas.width / particleSize);
-  const rows = Math.ceil(canvas.height / particleSize);
   const key = `${canvas.width}x${canvas.height}:${particleSize}`;
   if (deleteMotionMap?.key === key) {
     return deleteMotionMap;
   }
-
-  const cellCount = columns * rows;
-  const velocityX = new Float32Array(cellCount);
-  const velocityY = new Float32Array(cellCount);
-  const duration = new Float32Array(cellCount);
-  for (let index = 0; index < cellCount; index += 1) {
-    const angle = deterministicNoise(index, 1) * Math.PI * 2;
-    const velocity = (42 + deterministicNoise(index, 2) * 42) * pixelRatio * 0.2;
-    velocityX[index] = Math.cos(angle) * velocity;
-    velocityY[index] = Math.sin(angle) * velocity;
-    duration[index] = (0.7 + deterministicNoise(index, 3) * 0.8) / 2;
-  }
-  deleteMotionMap = { key, particleSize, columns, rows, velocityX, velocityY, duration };
+  deleteMotionMap = createDeleteMotionMap({ width: canvas.width, height: canvas.height, pixelRatio });
   return deleteMotionMap;
 }
 
@@ -593,65 +502,13 @@ function createDeleteParticles(strokes) {
     deleteMaskContext.clearRect(0, 0, deleteMaskCanvas.width, deleteMaskCanvas.height);
   }
   strokes.forEach((stroke) => drawStrokeMask(deleteMaskContext, stroke, motionMap.particleSize));
-  const alpha = deleteMaskContext.getImageData(
+  const rgba = deleteMaskContext.getImageData(
     0,
     0,
     deleteMaskCanvas.width,
     deleteMaskCanvas.height,
   ).data;
-
-  let particleCount = 0;
-  for (let index = 0; index < motionMap.columns * motionMap.rows; index += 1) {
-    if (alpha[index * 4 + 3] > 0) {
-      particleCount += 1;
-    }
-  }
-
-  const sx = new Float32Array(particleCount);
-  const sy = new Float32Array(particleCount);
-  const vx = new Float32Array(particleCount);
-  const vy = new Float32Array(particleCount);
-  const duration = new Float32Array(particleCount);
-  const colorIndex = new Uint16Array(particleCount);
-  const colors = new Map();
-  const palette = [];
-  let particleIndex = 0;
-  let maxDuration = 0;
-  for (let index = 0; index < motionMap.columns * motionMap.rows; index += 1) {
-    if (alpha[index * 4 + 3] === 0) {
-      continue;
-    }
-    const red = alpha[index * 4];
-    const green = alpha[index * 4 + 1];
-    const blue = alpha[index * 4 + 2];
-    const colorKey = (red << 16) | (green << 8) | blue;
-    if (!colors.has(colorKey)) {
-      colors.set(colorKey, palette.length);
-      palette.push(`rgb(${red} ${green} ${blue})`);
-    }
-    const column = index % motionMap.columns;
-    const row = Math.floor(index / motionMap.columns);
-    sx[particleIndex] = column * motionMap.particleSize;
-    sy[particleIndex] = row * motionMap.particleSize;
-    vx[particleIndex] = motionMap.velocityX[index];
-    vy[particleIndex] = motionMap.velocityY[index];
-    duration[particleIndex] = motionMap.duration[index];
-    colorIndex[particleIndex] = colors.get(colorKey);
-    maxDuration = Math.max(maxDuration, duration[particleIndex]);
-    particleIndex += 1;
-  }
-  return {
-    count: particleCount,
-    size: motionMap.particleSize,
-    sx,
-    sy,
-    vx,
-    vy,
-    duration,
-    colorIndex,
-    palette,
-    maxDuration,
-  };
+  return packDeleteParticles(rgba, motionMap);
 }
 
 function startDeleteEffect(deleteHistoryNode, deletedStrokes) {
@@ -771,7 +628,7 @@ function deleteAllStrokes() {
   }
 
   playPreparedDeleteSound();
-  playGauntletAnimation();
+  gauntletAnimation.play();
 
   if (state.drawing) {
     state.drawing = false;
@@ -1008,7 +865,7 @@ function undoLastStroke() {
     return;
   }
 
-  playTimeGauntletAnimation();
+  timeGauntletAnimation.play();
   playReverseSound();
   const { undoneNode, targetNode } = history.undo();
   if (undoneNode.kind === "delete") {
@@ -1149,6 +1006,7 @@ const pdfService = createPdfService({
   workerSrc: "./vendor/pdf.worker.min.js",
   canvasToImage: imageFromCanvas,
 });
+const libraryApi = createLibraryApi({ createUrl: apiUrl });
 
 function readImageFile(file) {
   return new Promise((resolve, reject) => {
@@ -1220,18 +1078,11 @@ async function chooseFileFromServer() {
   chooseFileButton.disabled = true;
 
   try {
-    const response = await fetch(
-      apiUrl("/api/select-file", {
-        dir: state.libraryFolder,
-        x: Math.round(window.screenX + window.outerWidth / 2),
-        y: Math.round(window.screenY + window.outerHeight / 2),
-      }),
-      { cache: "no-store" },
-    );
-    const payload = await response.json();
-    if (!response.ok || !payload.ok) {
-      throw new Error(payload.error || `File picker failed (${response.status})`);
-    }
+    const payload = await libraryApi.selectFile({
+      dir: state.libraryFolder,
+      x: Math.round(window.screenX + window.outerWidth / 2),
+      y: Math.round(window.screenY + window.outerHeight / 2),
+    });
     if (!payload.item) {
       return;
     }
@@ -1301,7 +1152,7 @@ async function loadLibraryItem(item) {
     if (item.type === "pdf") {
       const buffer = item.source === "browser"
         ? await (await browserFiles.getFile(item)).arrayBuffer()
-        : await (await fetch(item.url)).arrayBuffer();
+        : await libraryApi.readBuffer(item.url);
       const pdfResult = await pdfService.readBuffer(buffer);
       state.pdfDocument = pdfResult.documentProxy;
       state.pdfPage = 1;
@@ -1704,19 +1555,11 @@ async function saveFileCrop() {
       return;
     }
 
-    const response = await fetch("/api/crop-image", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        folder: state.sourceItem.folder || state.libraryFolder,
-        name: state.sourceItem.name,
-        dataUrl,
-      }),
+    const payload = await libraryApi.cropImage({
+      folder: state.sourceItem.folder || state.libraryFolder,
+      name: state.sourceItem.name,
+      dataUrl,
     });
-    const payload = await response.json();
-    if (!response.ok || !payload.ok) {
-      throw new Error(payload.error || `Crop failed (${response.status})`);
-    }
 
     const nextRevision = (state.cropRevisions.get(getItemKey(state.sourceItem)) || 0) + 1;
     state.sourceItem = {
@@ -1891,11 +1734,7 @@ async function loadLibrary(folder = state.libraryFolder) {
   libraryList.innerHTML = '<div class="library-empty">Scanning images...</div>';
 
   try {
-    const response = await fetch(apiUrl("/api/images", { dir: state.libraryFolder }), { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error(`API unavailable (${response.status})`);
-    }
-    const payload = await response.json();
+    const payload = await libraryApi.listImages(state.libraryFolder);
     state.libraryFolder = payload.folder || state.libraryFolder;
     state.libraryItems = payload.items || [];
     state.fileSource = "local";
@@ -1903,11 +1742,7 @@ async function loadLibrary(folder = state.libraryFolder) {
     chooseFileButton.textContent = "Choose image or PDF";
   } catch (error) {
     try {
-      const response = await fetch("/images/", { cache: "no-store" });
-      if (!response.ok) {
-        throw new Error(`Folder listing unavailable (${response.status})`);
-      }
-      state.libraryItems = readDirectoryListing(await response.text());
+      state.libraryItems = readDirectoryListing(await libraryApi.readDefaultDirectory());
     } catch (fallbackError) {
       state.libraryItems = [];
       state.fileSource = "browser";
