@@ -798,6 +798,17 @@ const libraryRenderer = createLibraryRenderer({
   renderPdfThumbnail,
 });
 
+function setPdfDocument(documentProxy = null, pageCount = 0) {
+  const previousDocument = state.pdfDocument;
+  state.pdfDocument = documentProxy;
+  state.pdfPage = 1;
+  state.pdfPageCount = pageCount;
+  state.pdfPages = [];
+  if (previousDocument && previousDocument !== documentProxy) {
+    pdfService.disposeDocument(previousDocument);
+  }
+}
+
 async function loadImage(file) {
   if (!file) {
     return;
@@ -814,16 +825,11 @@ async function loadImage(file) {
     if (isPdf) {
       const pdfResult = await pdfService.readFile(file);
       image = pdfResult.image;
-      state.pdfDocument = pdfResult.documentProxy;
-      state.pdfPage = 1;
-      state.pdfPageCount = pdfResult.pageCount;
+      setPdfDocument(pdfResult.documentProxy, pdfResult.pageCount);
       showPdfPages();
     } else {
       image = await mediaLoader.fromFile(file);
-      state.pdfDocument = null;
-      state.pdfPage = 1;
-      state.pdfPageCount = 0;
-      state.pdfPages = [];
+      setPdfDocument();
       setLibraryMode("folder");
       renderLibrary();
     }
@@ -929,18 +935,13 @@ async function loadLibraryItem(item) {
         ? await (await browserFiles.getFile(item)).arrayBuffer()
         : await libraryApi.readBuffer(item.url);
       const pdfResult = await pdfService.readBuffer(buffer);
-      state.pdfDocument = pdfResult.documentProxy;
-      state.pdfPage = 1;
-      state.pdfPageCount = pdfResult.pageCount;
+      setPdfDocument(pdfResult.documentProxy, pdfResult.pageCount);
       showPdfPages();
       applyLoadedBackground(pdfResult.image);
       return;
     }
 
-    state.pdfDocument = null;
-    state.pdfPage = 1;
-    state.pdfPageCount = 0;
-    state.pdfPages = [];
+    setPdfDocument();
     setLibraryMode("folder");
     renderLibrary();
     applyLoadedBackground(
@@ -1558,6 +1559,9 @@ window.addEventListener(
     libraryRequestGate.cancel();
     browserFiles.dispose();
     disposeAudioEffects();
+    gauntletAnimation.dispose();
+    timeGauntletAnimation.dispose();
+    pdfService.disposeDocument(state.pdfDocument);
   },
   { once: true },
 );

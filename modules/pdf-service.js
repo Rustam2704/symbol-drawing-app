@@ -1,4 +1,9 @@
-export function createPdfService({ pdfLibrary, workerSrc, canvasToImage }) {
+export function createPdfService({
+  pdfLibrary,
+  workerSrc,
+  canvasToImage,
+  documentRef = globalThis.document,
+}) {
   if (pdfLibrary && workerSrc) {
     pdfLibrary.GlobalWorkerOptions.workerSrc = workerSrc;
   }
@@ -13,7 +18,7 @@ export function createPdfService({ pdfLibrary, workerSrc, canvasToImage }) {
   async function renderPageCanvas(documentProxy, pageNumber, scale = 1) {
     const page = await documentProxy.getPage(pageNumber);
     const viewport = page.getViewport({ scale });
-    const canvas = document.createElement("canvas");
+    const canvas = documentRef.createElement("canvas");
     const context = canvas.getContext("2d");
     canvas.width = viewport.width;
     canvas.height = viewport.height;
@@ -39,5 +44,13 @@ export function createPdfService({ pdfLibrary, workerSrc, canvasToImage }) {
     return readBuffer(await file.arrayBuffer());
   }
 
-  return { readBuffer, readFile, renderPage, renderPageCanvas };
+  function disposeDocument(documentProxy) {
+    try {
+      return documentProxy?.destroy?.();
+    } catch {
+      return undefined;
+    }
+  }
+
+  return { disposeDocument, readBuffer, readFile, renderPage, renderPageCanvas };
 }

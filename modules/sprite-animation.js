@@ -1,6 +1,15 @@
-export function createSpriteAnimation({ canvas, source, frameSize, frameCount, frameDuration }) {
+export function createSpriteAnimation({
+  canvas,
+  source,
+  frameSize,
+  frameCount,
+  frameDuration,
+  ImageClass = globalThis.Image,
+  setIntervalFn = globalThis.setInterval,
+  clearIntervalFn = globalThis.clearInterval,
+}) {
   const context = canvas.getContext("2d");
-  const sprite = new Image();
+  const sprite = new ImageClass();
   let timer = null;
   let pending = false;
 
@@ -27,15 +36,15 @@ export function createSpriteAnimation({ canvas, source, frameSize, frameCount, f
 
     pending = false;
     if (timer !== null) {
-      clearInterval(timer);
+      clearIntervalFn(timer);
     }
 
     let frame = 0;
     drawFrame(frame);
-    timer = setInterval(() => {
+    timer = setIntervalFn(() => {
       frame += 1;
       if (frame >= frameCount) {
-        clearInterval(timer);
+        clearIntervalFn(timer);
         timer = null;
         drawFrame(0);
         return;
@@ -44,13 +53,23 @@ export function createSpriteAnimation({ canvas, source, frameSize, frameCount, f
     }, frameDuration);
   }
 
-  sprite.addEventListener("load", () => {
+  const handleLoad = () => {
     drawFrame(0);
     if (pending) {
       play();
     }
-  });
+  };
+  sprite.addEventListener("load", handleLoad);
   sprite.src = source;
 
-  return { play };
+  function dispose() {
+    pending = false;
+    if (timer !== null) {
+      clearIntervalFn(timer);
+      timer = null;
+    }
+    sprite.removeEventListener?.("load", handleLoad);
+  }
+
+  return { dispose, play };
 }
