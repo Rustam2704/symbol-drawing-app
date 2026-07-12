@@ -132,6 +132,13 @@ input {
   box-shadow: 0 10px 20px rgba(35, 124, 107, 0.2);
 }
 
+.clear-button,
+.undo-button {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
 .undo-button svg {
   width: 62px;
   height: 62px;
@@ -982,6 +989,12 @@ input[type="range"] {
   background: #808080;
   border-color: #808080;
   filter: none;
+}
+
+:root[data-theme="dark"] :is(.clear-button, .undo-button):not(:disabled):hover {
+  background: transparent;
+  border-color: transparent;
+  filter: brightness(0.92) saturate(1.08);
 }
 
 :root[data-theme="violet"] {

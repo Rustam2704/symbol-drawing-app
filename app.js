@@ -638,17 +638,69 @@ function createDeleteParticles(snapshot, background) {
         sy: y,
         sampleX,
         sampleY,
-        x,
-        y,
         vx: Math.cos(angle) * velocity,
         vy: Math.sin(angle) * velocity,
-        lifetime: 0.7 + Math.random() * 0.8,
+        delay: (sampleX / Math.max(1, snapshot.width)) * 0.36,
+        duration: (0.7 + Math.random() * 0.8) / 2,
         size: particleSize,
       });
     }
   }
 
   return particles;
+}
+
+function getDeleteEffectDuration(particles) {
+  return particles.reduce((duration, particle) => Math.max(duration, particle.delay + particle.duration), 0);
+}
+
+function drawDeleteParticle(effect, particle, sampleTime) {
+  const localTime = sampleTime - particle.delay;
+  let x = particle.sx;
+  let y = particle.sy;
+  let alpha = 1;
+
+  if (localTime > 0) {
+    const clampedTime = Math.min(localTime, particle.duration);
+    const simulationTime = clampedTime * 2;
+    const upwardAcceleration = -54 * (window.devicePixelRatio || 1);
+    x += particle.vx * simulationTime;
+    y += particle.vy * simulationTime + 0.5 * upwardAcceleration * simulationTime * simulationTime;
+    const remainingLifetime = Math.max(0, particle.duration - clampedTime) * 2;
+    alpha = Math.min(1, remainingLifetime / 0.3);
+  }
+
+  if (alpha <= 0) {
+    return;
+  }
+  context.globalAlpha = alpha;
+  context.drawImage(
+    effect.snapshot,
+    particle.sx,
+    particle.sy,
+    particle.size,
+    particle.size,
+    x,
+    y,
+    particle.size,
+    particle.size,
+  );
+}
+
+function ensureDeleteAnimationRunning() {
+  if (state.deleteEffects.length && state.deleteAnimationFrame === null) {
+    state.deleteAnimationFrame = requestAnimationFrame(drawDeleteEffectFrame);
+  }
+}
+
+function settleReassemblyEffects() {
+  const hasReassembly = state.deleteEffects.some((effect) => effect.direction === "reverse");
+  if (!hasReassembly) {
+    return;
+  }
+  state.deleteEffects = state.deleteEffects.filter((effect) => effect.direction !== "reverse");
+  state.strokes = cloneStrokes(currentHistoryNode.strokes);
+  drawScene();
 }
 
 function drawDeleteEffectFrame(timestamp) {
@@ -666,42 +718,21 @@ function drawDeleteEffectFrame(timestamp) {
     }
     const deltaTime = Math.min(0.05, (timestamp - effect.lastTimestamp) / 1000);
     effect.lastTimestamp = timestamp;
-    effect.phase += deltaTime * 2.2;
-    let hasVisibleParticles = false;
+    effect.elapsed += deltaTime * (effect.direction === "reverse" ? 2 : 1);
+    const runDuration = effect.direction === "reverse" ? effect.reverseFrom : effect.duration;
+    const sampleTime =
+      effect.direction === "reverse"
+        ? Math.max(0, effect.reverseFrom - effect.elapsed)
+        : Math.min(effect.duration, effect.elapsed);
 
     for (const particle of effect.particles) {
-      const horizontalFraction = particle.sampleX / Math.max(1, canvas.width);
-      const activationDelay = horizontalFraction * 0.8;
-      const isActive = effect.phase >= activationDelay;
-
-      if (isActive) {
-        particle.x += particle.vx * deltaTime * 2;
-        particle.y += particle.vy * deltaTime * 2;
-        particle.vy -= 54 * (window.devicePixelRatio || 1) * deltaTime * 2;
-        particle.lifetime = Math.max(0, particle.lifetime - deltaTime * 2);
-      }
-
-      const alpha = isActive ? Math.min(1, particle.lifetime / 0.3) : 1;
-      if (alpha <= 0) {
-        continue;
-      }
-      hasVisibleParticles = true;
-      context.globalAlpha = alpha;
-      context.drawImage(
-        effect.snapshot,
-        particle.sx,
-        particle.sy,
-        particle.size,
-        particle.size,
-        particle.x,
-        particle.y,
-        particle.size,
-        particle.size,
-      );
+      drawDeleteParticle(effect, particle, sampleTime);
     }
 
-    if (hasVisibleParticles && effect.phase < 4) {
+    if (effect.elapsed < runDuration) {
       activeEffects.push(effect);
+    } else if (effect.direction === "reverse" && currentHistoryNode.id === effect.targetHistoryId) {
+      state.strokes = cloneStrokes(effect.restoreStrokes);
     }
   }
   context.globalAlpha = 1;
@@ -716,6 +747,7 @@ function drawDeleteEffectFrame(timestamp) {
 }
 
 function deleteAllStrokes() {
+  settleReassemblyEffects();
   if (!state.strokes.length) {
     return;
   }
@@ -757,16 +789,22 @@ function deleteAllStrokes() {
     return;
   }
 
+  const duration = getDeleteEffectDuration(particles);
+  deleteHistoryNode.deleteEffect = {
+    snapshot,
+    particles,
+    duration,
+  };
   state.deleteEffects.push({
     historyId: deleteHistoryNode.id,
     snapshot,
     particles,
-    phase: 0,
+    duration,
+    direction: "forward",
+    elapsed: 0,
     lastTimestamp: null,
   });
-  if (state.deleteAnimationFrame === null) {
-    state.deleteAnimationFrame = requestAnimationFrame(drawDeleteEffectFrame);
-  }
+  ensureDeleteAnimationRunning();
 }
 
 function updateUndoButton() {
@@ -1002,22 +1040,56 @@ function setLibraryMode(mode) {
 }
 
 function undoLastStroke() {
+  settleReassemblyEffects();
   if (!currentHistoryNode.parent) {
     return;
   }
 
   playTimeGauntletAnimation();
   playEffectSound("./assets/thanos_reverse_sound.mp3");
-  if (currentHistoryNode.kind === "delete") {
-    state.deleteEffects = state.deleteEffects.filter((effect) => effect.historyId !== currentHistoryNode.id);
+  const undoneNode = currentHistoryNode;
+  const targetNode = undoneNode.parent;
+  const activeForwardEffect = state.deleteEffects.find(
+    (effect) => effect.historyId === undoneNode.id && effect.direction === "forward",
+  );
+  state.deleteEffects = state.deleteEffects.filter((effect) => effect.historyId !== undoneNode.id);
+  currentHistoryNode = targetNode;
+
+  if (
+    undoneNode.kind === "delete" &&
+    undoneNode.deleteEffect &&
+    !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  ) {
+    const reverseFrom = activeForwardEffect
+      ? Math.min(activeForwardEffect.elapsed, undoneNode.deleteEffect.duration)
+      : undoneNode.deleteEffect.duration;
+    state.strokes = [];
+    if (reverseFrom > 0) {
+      state.deleteEffects.push({
+        historyId: undoneNode.id,
+        snapshot: undoneNode.deleteEffect.snapshot,
+        particles: undoneNode.deleteEffect.particles,
+        duration: undoneNode.deleteEffect.duration,
+        direction: "reverse",
+        reverseFrom,
+        elapsed: 0,
+        lastTimestamp: null,
+        targetHistoryId: targetNode.id,
+        restoreStrokes: cloneStrokes(targetNode.strokes),
+      });
+      ensureDeleteAnimationRunning();
+    } else {
+      state.strokes = cloneStrokes(targetNode.strokes);
+    }
+  } else {
+    state.strokes = cloneStrokes(targetNode.strokes);
   }
-  currentHistoryNode = currentHistoryNode.parent;
-  state.strokes = cloneStrokes(currentHistoryNode.strokes);
   drawScene();
   updateUndoButton();
 }
 
 function startDrawing(event) {
+  settleReassemblyEffects();
   event.preventDefault();
   canvas.setPointerCapture(event.pointerId);
 
@@ -2009,11 +2081,16 @@ async function loadLibrary(folder = state.libraryFolder) {
 clearButton.addEventListener("click", deleteAllStrokes);
 
 document.addEventListener("keydown", (event) => {
-  if (event.key !== "Delete" || event.repeat) {
+  if (event.repeat) {
     return;
   }
-  event.preventDefault();
-  deleteAllStrokes();
+  if (event.key === "Delete") {
+    event.preventDefault();
+    deleteAllStrokes();
+  } else if (event.key === "Backspace") {
+    event.preventDefault();
+    undoLastStroke();
+  }
 });
 
 undoButton.addEventListener("click", undoLastStroke);
