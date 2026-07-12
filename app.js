@@ -2,6 +2,17 @@ import { getStroke } from "./vendor/perfect-freehand-package/package/dist/esm/in
 
 import { browserFiles } from "./web/browser-files.js";
 import { createAudioEffects } from "./modules/audio-effects.js";
+import {
+  clampPointToRect,
+  fitFileCropPreview,
+  fitImagePreview,
+  imageCropToPreviewRect,
+  imageSquareToPreviewRect,
+  makeCenteredSquare,
+  makeRect,
+  previewRectToImageCrop,
+  previewSquareToImageCrop,
+} from "./modules/crop-geometry.js";
 import { cloneStrokes, createHistory } from "./modules/history.js";
 import {
   canCropSourceItem,
@@ -9,6 +20,7 @@ import {
   getFolderFromSelectedFile,
   sortLibraryItems,
 } from "./modules/library-utils.js";
+import { createPdfService } from "./modules/pdf-service.js";
 
 const appShell = document.querySelector(".app-shell");
 const canvas = document.querySelector("#practiceCanvas");
@@ -279,12 +291,6 @@ function getPdfLibrary() {
     (typeof window !== "undefined" ? window.pdfjsLib : null) ||
     document.defaultView?.pdfjsLib
   );
-}
-
-const pdfLibrary = getPdfLibrary();
-
-if (pdfLibrary) {
-  pdfLibrary.GlobalWorkerOptions.workerSrc = "./vendor/pdf.worker.min.js";
 }
 
 function fitCanvasToContainer() {
@@ -1138,6 +1144,12 @@ function imageFromCanvas(sourceCanvas) {
   return imageFromSrc(sourceCanvas.toDataURL("image/png"));
 }
 
+const pdfService = createPdfService({
+  pdfLibrary: getPdfLibrary(),
+  workerSrc: "./vendor/pdf.worker.min.js",
+  canvasToImage: imageFromCanvas,
+});
+
 function readImageFile(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1151,44 +1163,6 @@ function readImageFile(file) {
     reader.addEventListener("error", () => reject(new Error("Could not read image.")));
     reader.readAsDataURL(file);
   });
-}
-
-async function readPdfBuffer(buffer) {
-  const pdf = getPdfLibrary();
-
-  if (!pdf) {
-    throw new Error("PDF support did not load. Check your internet connection and reload.");
-  }
-
-  const documentProxy = await pdf.getDocument({ data: buffer }).promise;
-  const image = await renderPdfPage(documentProxy, 1);
-
-  return {
-    documentProxy,
-    image,
-    pageCount: documentProxy.numPages,
-  };
-}
-
-async function readPdfFile(file) {
-  const buffer = await file.arrayBuffer();
-  return readPdfBuffer(buffer);
-}
-
-async function renderPdfPage(documentProxy, pageNumber) {
-  const scratch = await renderPdfPageCanvas(documentProxy, pageNumber, 2);
-  return imageFromCanvas(scratch);
-}
-
-async function renderPdfPageCanvas(documentProxy, pageNumber, scale = 1) {
-  const page = await documentProxy.getPage(pageNumber);
-  const viewport = page.getViewport({ scale });
-  const scratch = document.createElement("canvas");
-  const scratchContext = scratch.getContext("2d");
-  scratch.width = viewport.width;
-  scratch.height = viewport.height;
-  await page.render({ canvasContext: scratchContext, viewport }).promise;
-  return scratch;
 }
 
 async function loadImage(file) {
@@ -1205,7 +1179,7 @@ async function loadImage(file) {
     let image;
 
     if (isPdf) {
-      const pdfResult = await readPdfFile(file);
+      const pdfResult = await pdfService.readFile(file);
       image = pdfResult.image;
       state.pdfDocument = pdfResult.documentProxy;
       state.pdfPage = 1;
@@ -1328,7 +1302,7 @@ async function loadLibraryItem(item) {
       const buffer = item.source === "browser"
         ? await (await browserFiles.getFile(item)).arrayBuffer()
         : await (await fetch(item.url)).arrayBuffer();
-      const pdfResult = await readPdfBuffer(buffer);
+      const pdfResult = await pdfService.readBuffer(buffer);
       state.pdfDocument = pdfResult.documentProxy;
       state.pdfPage = 1;
       state.pdfPageCount = pdfResult.pageCount;
@@ -1366,7 +1340,7 @@ async function setPdfPage(pageNumber) {
   updateFileCropButton();
 
   try {
-    state.backgroundImage = await renderPdfPage(state.pdfDocument, nextPage);
+    state.backgroundImage = await pdfService.renderPage(state.pdfDocument, nextPage);
     state.pdfPage = nextPage;
     state.crop = null;
     cropState.selection = null;
@@ -1394,21 +1368,8 @@ function fitCropCanvas() {
 }
 
 function getPreviewRect() {
-  const image = state.backgroundImage;
   const padding = 24 * (window.devicePixelRatio || 1);
-  const availableWidth = Math.max(1, cropCanvas.width - padding * 2);
-  const availableHeight = Math.max(1, cropCanvas.height - padding * 2);
-  const scale = Math.min(availableWidth / image.width, availableHeight / image.height);
-  const width = image.width * scale;
-  const height = image.height * scale;
-
-  return {
-    x: (cropCanvas.width - width) / 2,
-    y: (cropCanvas.height - height) / 2,
-    width,
-    height,
-    scale,
-  };
+  return fitImagePreview(state.backgroundImage, cropCanvas, padding);
 }
 
 function drawCropPreview() {
@@ -1424,7 +1385,7 @@ function drawCropPreview() {
   cropState.previewRect = preview;
   cropContext.drawImage(state.backgroundImage, preview.x, preview.y, preview.width, preview.height);
 
-  const selection = cropState.selection || imageCropToPreviewRect(state.crop);
+  const selection = cropState.selection || imageCropToPreviewRect(state.crop, cropState.previewRect);
   if (!selection) {
     return;
   }
@@ -1449,21 +1410,6 @@ function drawCropPreview() {
   cropContext.restore();
 }
 
-function imageCropToPreviewRect(crop) {
-  if (!crop || !cropState.previewRect) {
-    return null;
-  }
-
-  const preview = cropState.previewRect;
-
-  return {
-    x: preview.x + crop.x * preview.scale,
-    y: preview.y + crop.y * preview.scale,
-    width: crop.width * preview.scale,
-    height: crop.height * preview.scale,
-  };
-}
-
 function getCropPoint(event) {
   const rect = cropCanvas.getBoundingClientRect();
   const ratioX = cropCanvas.width / rect.width;
@@ -1472,35 +1418,6 @@ function getCropPoint(event) {
   return {
     x: (event.clientX - rect.left) * ratioX,
     y: (event.clientY - rect.top) * ratioY,
-  };
-}
-
-function clampPointToPreview(point) {
-  const preview = cropState.previewRect;
-
-  return {
-    x: Math.min(Math.max(point.x, preview.x), preview.x + preview.width),
-    y: Math.min(Math.max(point.y, preview.y), preview.y + preview.height),
-  };
-}
-
-function makeRect(a, b) {
-  return {
-    x: Math.min(a.x, b.x),
-    y: Math.min(a.y, b.y),
-    width: Math.abs(a.x - b.x),
-    height: Math.abs(a.y - b.y),
-  };
-}
-
-function previewRectToImageCrop(rect) {
-  const preview = cropState.previewRect;
-
-  return {
-    x: Math.round((rect.x - preview.x) / preview.scale),
-    y: Math.round((rect.y - preview.y) / preview.scale),
-    width: Math.round(rect.width / preview.scale),
-    height: Math.round(rect.height / preview.scale),
   };
 }
 
@@ -1525,47 +1442,8 @@ function fitFileCropCanvas() {
 }
 
 function getFileCropPreviewRect() {
-  const image = state.backgroundImage;
-  const space = {
-    x: -FILE_CROP_PADDING,
-    y: -FILE_CROP_PADDING,
-    width: image.width + FILE_CROP_PADDING * 2,
-    height: image.height + FILE_CROP_PADDING * 2,
-  };
   const padding = 24 * (window.devicePixelRatio || 1);
-  const availableWidth = Math.max(1, fileCropCanvas.width - padding * 2);
-  const availableHeight = Math.max(1, fileCropCanvas.height - padding * 2);
-  const scale = Math.min(availableWidth / space.width, availableHeight / space.height);
-  const width = space.width * scale;
-  const height = space.height * scale;
-
-  return {
-    x: (fileCropCanvas.width - width) / 2,
-    y: (fileCropCanvas.height - height) / 2,
-    width,
-    height,
-    scale,
-    space,
-  };
-}
-
-function makeCenteredSquare(center, side, preview) {
-  const maxSide = Math.min(
-    preview.width,
-    preview.height,
-    (center.x - preview.x) * 2,
-    (preview.x + preview.width - center.x) * 2,
-    (center.y - preview.y) * 2,
-    (preview.y + preview.height - center.y) * 2,
-  );
-  const squareSide = Math.max(8 * (window.devicePixelRatio || 1), Math.min(side, maxSide));
-
-  return {
-    x: center.x - squareSide / 2,
-    y: center.y - squareSide / 2,
-    width: squareSide,
-    height: squareSide,
-  };
+  return fitFileCropPreview(state.backgroundImage, fileCropCanvas, FILE_CROP_PADDING, padding);
 }
 
 function getFileCropPoint(event) {
@@ -1576,39 +1454,6 @@ function getFileCropPoint(event) {
   return {
     x: (event.clientX - rect.left) * ratioX,
     y: (event.clientY - rect.top) * ratioY,
-  };
-}
-
-function clampFileCropPointToPreview(point) {
-  const preview = fileCropState.previewRect;
-
-  return {
-    x: Math.min(Math.max(point.x, preview.x), preview.x + preview.width),
-    y: Math.min(Math.max(point.y, preview.y), preview.y + preview.height),
-  };
-}
-
-function previewSquareToImageCrop(rect, preview = fileCropState.previewRect) {
-  const x = Math.round((rect.x - preview.x) / preview.scale + preview.space.x);
-  const y = Math.round((rect.y - preview.y) / preview.scale + preview.space.y);
-  const side = Math.round(rect.width / preview.scale);
-
-  return {
-    x,
-    y,
-    width: side,
-    height: side,
-  };
-}
-
-function imageSquareToFilePreviewRect(crop) {
-  const preview = fileCropState.previewRect;
-
-  return {
-    x: preview.x + (crop.x - preview.space.x) * preview.scale,
-    y: preview.y + (crop.y - preview.space.y) * preview.scale,
-    width: crop.width * preview.scale,
-    height: crop.height * preview.scale,
   };
 }
 
@@ -1675,6 +1520,7 @@ function setDefaultFileCropSelection() {
     { x: preview.x + preview.width / 2, y: preview.y + preview.height / 2 },
     side,
     preview,
+    8 * (window.devicePixelRatio || 1),
   );
 }
 
@@ -1785,7 +1631,7 @@ function applyAutoCrop() {
     return;
   }
 
-  fileCropState.selection = imageSquareToFilePreviewRect(crop);
+  fileCropState.selection = imageSquareToPreviewRect(crop, fileCropState.previewRect);
   drawFileCropPreview();
 }
 
@@ -1836,7 +1682,7 @@ async function saveFileCrop() {
     return;
   }
 
-  const crop = previewSquareToImageCrop(fileCropState.selection);
+  const crop = previewSquareToImageCrop(fileCropState.selection, fileCropState.previewRect);
   if (crop.width < 8 || crop.height < 8) {
     return;
   }
@@ -1942,7 +1788,7 @@ async function renderPdfThumbnail(pageNumber, targetCanvas) {
   }
 
   try {
-    const source = await renderPdfPageCanvas(state.pdfDocument, pageNumber, 0.28);
+    const source = await pdfService.renderPageCanvas(state.pdfDocument, pageNumber, 0.28);
     const ratio = window.devicePixelRatio || 1;
     const rect = targetCanvas.getBoundingClientRect();
     targetCanvas.width = Math.max(1, Math.floor(rect.width * ratio));
@@ -2224,7 +2070,7 @@ resetCropButton.addEventListener("click", () => {
 
 applyCropButton.addEventListener("click", () => {
   if (cropState.selection && cropState.selection.width > 6 && cropState.selection.height > 6) {
-    state.crop = previewRectToImageCrop(cropState.selection);
+    state.crop = previewRectToImageCrop(cropState.selection, cropState.previewRect);
   }
   cropDialog.close();
   drawScene();
@@ -2238,7 +2084,7 @@ cropCanvas.addEventListener("pointerdown", (event) => {
   event.preventDefault();
   cropCanvas.setPointerCapture(event.pointerId);
   cropState.selecting = true;
-  cropState.startPoint = clampPointToPreview(getCropPoint(event));
+  cropState.startPoint = clampPointToRect(getCropPoint(event), cropState.previewRect);
   cropState.selection = makeRect(cropState.startPoint, cropState.startPoint);
   drawCropPreview();
 });
@@ -2249,7 +2095,7 @@ cropCanvas.addEventListener("pointermove", (event) => {
   }
 
   event.preventDefault();
-  const point = clampPointToPreview(getCropPoint(event));
+  const point = clampPointToRect(getCropPoint(event), cropState.previewRect);
   cropState.selection = makeRect(cropState.startPoint, point);
   drawCropPreview();
 });
@@ -2276,8 +2122,13 @@ fileCropCanvas.addEventListener("pointerdown", (event) => {
   event.preventDefault();
   fileCropCanvas.setPointerCapture(event.pointerId);
   fileCropState.selecting = true;
-  fileCropState.centerPoint = clampFileCropPointToPreview(getFileCropPoint(event));
-  fileCropState.selection = makeCenteredSquare(fileCropState.centerPoint, 8, fileCropState.previewRect);
+  fileCropState.centerPoint = clampPointToRect(getFileCropPoint(event), fileCropState.previewRect);
+  fileCropState.selection = makeCenteredSquare(
+    fileCropState.centerPoint,
+    8,
+    fileCropState.previewRect,
+    8 * (window.devicePixelRatio || 1),
+  );
   drawFileCropPreview();
 });
 
@@ -2287,12 +2138,17 @@ fileCropCanvas.addEventListener("pointermove", (event) => {
   }
 
   event.preventDefault();
-  const point = clampFileCropPointToPreview(getFileCropPoint(event));
+  const point = clampPointToRect(getFileCropPoint(event), fileCropState.previewRect);
   const side = Math.max(
     Math.abs(point.x - fileCropState.centerPoint.x),
     Math.abs(point.y - fileCropState.centerPoint.y),
   ) * 2;
-  fileCropState.selection = makeCenteredSquare(fileCropState.centerPoint, side, fileCropState.previewRect);
+  fileCropState.selection = makeCenteredSquare(
+    fileCropState.centerPoint,
+    side,
+    fileCropState.previewRect,
+    8 * (window.devicePixelRatio || 1),
+  );
   drawFileCropPreview();
 });
 
@@ -2329,7 +2185,10 @@ function updateLayoutAfterResize() {
     fitFileCropCanvas();
     fileCropState.previewRect = getFileCropPreviewRect();
     if (fileCropState.selection) {
-      fileCropState.selection = imageSquareToFilePreviewRect(previewSquareToImageCrop(fileCropState.selection));
+      fileCropState.selection = imageSquareToPreviewRect(
+        previewSquareToImageCrop(fileCropState.selection, fileCropState.previewRect),
+        fileCropState.previewRect,
+      );
     } else {
       setDefaultFileCropSelection();
     }
