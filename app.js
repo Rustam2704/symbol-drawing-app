@@ -1,6 +1,8 @@
 import { getStroke } from "./vendor/perfect-freehand-package/package/dist/esm/index.mjs";
 
 import { browserFiles } from "./web/browser-files.js";
+import { createAudioEffects } from "./modules/audio-effects.js";
+import { cloneStrokes, createHistory } from "./modules/history.js";
 
 const appShell = document.querySelector(".app-shell");
 const canvas = document.querySelector("#practiceCanvas");
@@ -57,92 +59,16 @@ const rangeInputs = Array.from(document.querySelectorAll('input[type="range"]'))
 const GAUNTLET_FRAME_SIZE = 80;
 const GAUNTLET_FRAME_COUNT = 48;
 const GAUNTLET_FRAME_DURATION = 10;
-const EFFECT_AUDIO_RATE = 2;
-const DELETE_AUDIO_RATE = 2;
 const gauntletSprite = new Image();
 const timeGauntletSprite = new Image();
 let gauntletAnimationTimer = null;
 let timeGauntletAnimationTimer = null;
 let gauntletAnimationPending = false;
 let timeGauntletAnimationPending = false;
-const activeEffectSounds = new Set();
-const EffectAudioContext = window.AudioContext || window.webkitAudioContext;
-const EffectOfflineAudioContext = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-const effectAudioContext = EffectAudioContext ? new EffectAudioContext() : null;
-let preparedDeleteSounds = null;
-const activeDeleteSoundSources = new Set();
-
-async function renderAcceleratedBuffer(buffer) {
-  const duration = buffer.duration / DELETE_AUDIO_RATE;
-  const offline = new EffectOfflineAudioContext(
-    buffer.numberOfChannels,
-    Math.ceil(duration * effectAudioContext.sampleRate),
-    effectAudioContext.sampleRate,
-  );
-  const source = offline.createBufferSource();
-  source.buffer = buffer;
-  source.playbackRate.value = DELETE_AUDIO_RATE;
-  source.connect(offline.destination);
-  source.start(0);
-  return offline.startRendering();
-}
-
-async function prepareDeleteSound() {
-  if (!effectAudioContext || !EffectOfflineAudioContext) {
-    return;
-  }
-
-  try {
-    const paths = [
-      ...Array.from({ length: 3 }, (_, index) => `./assets/finger-snap${index + 1}.ogg`),
-      ...Array.from({ length: 6 }, (_, index) => `./assets/thanos_dust_${index + 1}.mp3`),
-    ];
-    const encoded = await Promise.all(
-      paths.map((path) => fetch(path).then((response) => response.arrayBuffer())),
-    );
-    const decoded = await Promise.all(
-      encoded.map((source) => effectAudioContext.decodeAudioData(source)),
-    );
-    preparedDeleteSounds = {
-      snaps: decoded.slice(0, 3),
-      dust: await Promise.all(decoded.slice(3, 9).map(renderAcceleratedBuffer)),
-    };
-  } catch {
-    preparedDeleteSounds = null;
-  }
-}
-
-function playPreparedDeleteSound() {
-  if (!effectAudioContext || !preparedDeleteSounds) {
-    return;
-  }
-
-  effectAudioContext.resume();
-  const buffers = [
-    preparedDeleteSounds.snaps[Math.floor(Math.random() * preparedDeleteSounds.snaps.length)],
-    preparedDeleteSounds.dust[Math.floor(Math.random() * preparedDeleteSounds.dust.length)],
-  ];
-  const startTime = effectAudioContext.currentTime + 0.005;
-  buffers.forEach((buffer) => {
-    const source = effectAudioContext.createBufferSource();
-    source.buffer = buffer;
-    source.connect(effectAudioContext.destination);
-    activeDeleteSoundSources.add(source);
-    source.addEventListener("ended", () => activeDeleteSoundSources.delete(source), { once: true });
-    source.start(startTime);
-  });
-}
-
-function stopDeleteSounds() {
-  activeDeleteSoundSources.forEach((source) => {
-    try {
-      source.stop();
-    } catch {
-      // A source may already have finished between the click and this loop.
-    }
-  });
-  activeDeleteSoundSources.clear();
-}
+const { playPreparedDeleteSound, playReverseSound, stopDeleteSounds } = createAudioEffects({
+  deleteRate: 2,
+  reverseRate: 2,
+});
 
 function drawSpriteFrame(sprite, targetContext, frame) {
   targetContext.clearRect(0, 0, GAUNTLET_FRAME_SIZE, GAUNTLET_FRAME_SIZE);
@@ -209,19 +135,6 @@ function playTimeGauntletAnimation() {
   }, GAUNTLET_FRAME_DURATION);
 }
 
-function playEffectSound(source) {
-  const sound = new Audio(source);
-  sound.preload = "auto";
-  sound.playbackRate = EFFECT_AUDIO_RATE;
-  sound.preservesPitch = false;
-  sound.webkitPreservesPitch = false;
-  activeEffectSounds.add(sound);
-  const release = () => activeEffectSounds.delete(sound);
-  sound.addEventListener("ended", release, { once: true });
-  sound.addEventListener("error", release, { once: true });
-  sound.play().catch(release);
-}
-
 gauntletSprite.addEventListener("load", () => {
   drawSpriteFrame(gauntletSprite, gauntletContext, 0);
   if (gauntletAnimationPending) {
@@ -237,7 +150,6 @@ timeGauntletSprite.addEventListener("load", () => {
   }
 });
 timeGauntletSprite.src = "./assets/thanos_time.png";
-prepareDeleteSound();
 
 function readSavedBoolean(key) {
   try {
@@ -331,95 +243,10 @@ const state = {
   deleteAnimationFrame: null,
 };
 
-const HISTORY_ACTION_LIMIT = 50;
-let nextHistoryId = 1;
-
-function cloneStrokes(strokes) {
-  return strokes.map((stroke) => ({
-    ...stroke,
-    points: stroke.points.map((point) => ({ ...point })),
-  }));
-}
-
-const historyRoot = {
-  id: 0,
-  kind: "root",
-  strokes: [],
-  parent: null,
-  children: [],
-};
-let currentHistoryNode = historyRoot;
-const historyNodes = new Map([[historyRoot.id, historyRoot]]);
-const historyOrder = [historyRoot];
-
-function removeHistoryLeaf(node) {
-  if (node.parent) {
-    node.parent.children = node.parent.children.filter((child) => child !== node);
-  }
-  historyNodes.delete(node.id);
-  const orderIndex = historyOrder.indexOf(node);
-  if (orderIndex !== -1) {
-    historyOrder.splice(orderIndex, 1);
-  }
-}
-
-function trimHistoryTree() {
-  const protectedPath = [];
-  let pathNode = currentHistoryNode;
-  while (pathNode) {
-    protectedPath.push(pathNode);
-    pathNode = pathNode.parent;
-  }
-  const protectedNodes = new Set(protectedPath.slice(0, HISTORY_ACTION_LIMIT + 1));
-
-  while (historyNodes.size > HISTORY_ACTION_LIMIT + 1) {
-    const removableLeaf = historyOrder.find(
-      (node) => node !== historyRoot && !protectedNodes.has(node) && node.children.length === 0,
-    );
-    if (!removableLeaf) {
-      break;
-    }
-    removeHistoryLeaf(removableLeaf);
-  }
-
-  if (historyNodes.size <= HISTORY_ACTION_LIMIT + 1 || protectedPath.length <= HISTORY_ACTION_LIMIT + 1) {
-    return;
-  }
-
-  const newRoot = protectedPath[HISTORY_ACTION_LIMIT];
-  newRoot.parent = null;
-  const reachable = new Set();
-  const stack = [newRoot];
-  while (stack.length) {
-    const node = stack.pop();
-    if (reachable.has(node)) {
-      continue;
-    }
-    reachable.add(node);
-    stack.push(...node.children);
-  }
-  for (const node of [...historyOrder]) {
-    if (!reachable.has(node)) {
-      historyNodes.delete(node.id);
-      historyOrder.splice(historyOrder.indexOf(node), 1);
-    }
-  }
-}
+const history = createHistory({ limit: 20 });
 
 function recordHistory(kind) {
-  const node = {
-    id: nextHistoryId,
-    kind,
-    strokes: cloneStrokes(state.strokes),
-    parent: currentHistoryNode,
-    children: [],
-  };
-  nextHistoryId += 1;
-  currentHistoryNode.children.push(node);
-  currentHistoryNode = node;
-  historyNodes.set(node.id, node);
-  historyOrder.push(node);
-  trimHistoryTree();
+  const node = history.record(kind, state.strokes);
   updateUndoButton();
   return node;
 }
@@ -673,6 +500,8 @@ function drawScene() {
 }
 
 let deleteMotionMap = null;
+const deleteMaskCanvas = document.createElement("canvas");
+const deleteMaskContext = deleteMaskCanvas.getContext("2d", { willReadFrequently: true });
 
 function deterministicNoise(index, salt) {
   const value = Math.sin(index * 12.9898 + salt * 78.233) * 43758.5453;
@@ -694,11 +523,11 @@ function getDeleteMotionMap() {
   const velocityY = new Float32Array(cellCount);
   const duration = new Float32Array(cellCount);
   for (let index = 0; index < cellCount; index += 1) {
-      const angle = deterministicNoise(index, 1) * Math.PI * 2;
-      const velocity = (42 + deterministicNoise(index, 2) * 42) * pixelRatio * 0.2;
-      velocityX[index] = Math.cos(angle) * velocity;
-      velocityY[index] = Math.sin(angle) * velocity;
-      duration[index] = (0.7 + deterministicNoise(index, 3) * 0.8) / 2;
+    const angle = deterministicNoise(index, 1) * Math.PI * 2;
+    const velocity = (42 + deterministicNoise(index, 2) * 42) * pixelRatio * 0.2;
+    velocityX[index] = Math.cos(angle) * velocity;
+    velocityY[index] = Math.sin(angle) * velocity;
+    duration[index] = (0.7 + deterministicNoise(index, 3) * 0.8) / 2;
   }
   deleteMotionMap = { key, particleSize, columns, rows, velocityX, velocityY, duration };
   return deleteMotionMap;
@@ -744,15 +573,37 @@ function drawStrokeMask(maskContext, stroke, particleSize) {
 
 function createDeleteParticles(strokes) {
   const motionMap = getDeleteMotionMap();
-  const mask = document.createElement("canvas");
-  mask.width = motionMap.columns;
-  mask.height = motionMap.rows;
-  const maskContext = mask.getContext("2d", { willReadFrequently: true });
-  strokes.forEach((stroke) => drawStrokeMask(maskContext, stroke, motionMap.particleSize));
-  const alpha = maskContext.getImageData(0, 0, mask.width, mask.height).data;
+  if (deleteMaskCanvas.width !== motionMap.columns || deleteMaskCanvas.height !== motionMap.rows) {
+    deleteMaskCanvas.width = motionMap.columns;
+    deleteMaskCanvas.height = motionMap.rows;
+  } else {
+    deleteMaskContext.clearRect(0, 0, deleteMaskCanvas.width, deleteMaskCanvas.height);
+  }
+  strokes.forEach((stroke) => drawStrokeMask(deleteMaskContext, stroke, motionMap.particleSize));
+  const alpha = deleteMaskContext.getImageData(
+    0,
+    0,
+    deleteMaskCanvas.width,
+    deleteMaskCanvas.height,
+  ).data;
 
-  const particles = [];
+  let particleCount = 0;
+  for (let index = 0; index < motionMap.columns * motionMap.rows; index += 1) {
+    if (alpha[index * 4 + 3] > 0) {
+      particleCount += 1;
+    }
+  }
+
+  const sx = new Float32Array(particleCount);
+  const sy = new Float32Array(particleCount);
+  const vx = new Float32Array(particleCount);
+  const vy = new Float32Array(particleCount);
+  const duration = new Float32Array(particleCount);
+  const colorIndex = new Uint16Array(particleCount);
   const colors = new Map();
+  const palette = [];
+  let particleIndex = 0;
+  let maxDuration = 0;
   for (let index = 0; index < motionMap.columns * motionMap.rows; index += 1) {
     if (alpha[index * 4 + 3] === 0) {
       continue;
@@ -762,36 +613,41 @@ function createDeleteParticles(strokes) {
     const blue = alpha[index * 4 + 2];
     const colorKey = (red << 16) | (green << 8) | blue;
     if (!colors.has(colorKey)) {
-      colors.set(colorKey, `rgb(${red} ${green} ${blue})`);
+      colors.set(colorKey, palette.length);
+      palette.push(`rgb(${red} ${green} ${blue})`);
     }
     const column = index % motionMap.columns;
     const row = Math.floor(index / motionMap.columns);
-    const sx = column * motionMap.particleSize;
-    particles.push({
-      sx,
-      sy: row * motionMap.particleSize,
-      vx: motionMap.velocityX[index],
-      vy: motionMap.velocityY[index],
-      delay: 0,
-      duration: motionMap.duration[index],
-      size: motionMap.particleSize,
-      color: colors.get(colorKey),
-    });
+    sx[particleIndex] = column * motionMap.particleSize;
+    sy[particleIndex] = row * motionMap.particleSize;
+    vx[particleIndex] = motionMap.velocityX[index];
+    vy[particleIndex] = motionMap.velocityY[index];
+    duration[particleIndex] = motionMap.duration[index];
+    colorIndex[particleIndex] = colors.get(colorKey);
+    maxDuration = Math.max(maxDuration, duration[particleIndex]);
+    particleIndex += 1;
   }
-  return particles;
-}
-
-function getDeleteEffectDuration(particles) {
-  return particles.reduce((duration, particle) => Math.max(duration, particle.delay + particle.duration), 0);
+  return {
+    count: particleCount,
+    size: motionMap.particleSize,
+    sx,
+    sy,
+    vx,
+    vy,
+    duration,
+    colorIndex,
+    palette,
+    maxDuration,
+  };
 }
 
 function startDeleteEffect(deleteHistoryNode, deletedStrokes) {
   const particles = createDeleteParticles(deletedStrokes);
-  if (!particles.length) {
+  if (!particles.count) {
     return;
   }
 
-  const duration = getDeleteEffectDuration(particles);
+  const duration = particles.maxDuration;
   deleteHistoryNode.deleteEffect = {
     particles,
     duration,
@@ -806,19 +662,20 @@ function startDeleteEffect(deleteHistoryNode, deletedStrokes) {
   });
 }
 
-function drawDeleteParticle(effect, particle, sampleTime) {
-  const localTime = sampleTime - particle.delay;
-  let x = particle.sx;
-  let y = particle.sy;
+function drawDeleteParticle(effect, particleIndex, sampleTime) {
+  const particles = effect.particles;
+  const particleDuration = particles.duration[particleIndex];
+  let x = particles.sx[particleIndex];
+  let y = particles.sy[particleIndex];
   let alpha = 1;
 
-  if (localTime > 0) {
-    const clampedTime = Math.min(localTime, particle.duration);
+  if (sampleTime > 0) {
+    const clampedTime = Math.min(sampleTime, particleDuration);
     const simulationTime = clampedTime * 2;
     const upwardAcceleration = -54 * (window.devicePixelRatio || 1);
-    x += particle.vx * simulationTime;
-    y += particle.vy * simulationTime + 0.5 * upwardAcceleration * simulationTime * simulationTime;
-    const remainingLifetime = Math.max(0, particle.duration - clampedTime) * 2;
+    x += particles.vx[particleIndex] * simulationTime;
+    y += particles.vy[particleIndex] * simulationTime + 0.5 * upwardAcceleration * simulationTime * simulationTime;
+    const remainingLifetime = Math.max(0, particleDuration - clampedTime) * 2;
     alpha = Math.min(1, remainingLifetime / 0.3);
   }
 
@@ -826,11 +683,12 @@ function drawDeleteParticle(effect, particle, sampleTime) {
     return;
   }
   context.globalAlpha = alpha;
-  if (effect.renderColor !== particle.color) {
-    effect.renderColor = particle.color;
-    context.fillStyle = particle.color;
+  const color = particles.palette[particles.colorIndex[particleIndex]];
+  if (effect.renderColor !== color) {
+    effect.renderColor = color;
+    context.fillStyle = color;
   }
-  context.fillRect(x, y, particle.size, particle.size);
+  context.fillRect(x, y, particles.size, particles.size);
 }
 
 function ensureDeleteAnimationRunning() {
@@ -845,7 +703,7 @@ function settleReassemblyEffects() {
     return;
   }
   state.deleteEffects = state.deleteEffects.filter((effect) => effect.direction !== "reverse");
-  state.strokes = cloneStrokes(currentHistoryNode.strokes);
+  state.strokes = cloneStrokes(history.current.strokes);
   drawScene();
 }
 
@@ -872,13 +730,13 @@ function drawDeleteEffectFrame(timestamp) {
         ? Math.max(0, effect.reverseFrom - effect.elapsed)
         : Math.min(effect.duration, effect.elapsed);
 
-    for (const particle of effect.particles) {
-      drawDeleteParticle(effect, particle, sampleTime);
+    for (let particleIndex = 0; particleIndex < effect.particles.count; particleIndex += 1) {
+      drawDeleteParticle(effect, particleIndex, sampleTime);
     }
 
     if (effect.elapsed < runDuration) {
       activeEffects.push(effect);
-    } else if (effect.direction === "reverse" && currentHistoryNode.id === effect.targetHistoryId) {
+    } else if (effect.direction === "reverse" && history.current.id === effect.targetHistoryId) {
       state.strokes = cloneStrokes(effect.restoreStrokes);
     }
   }
@@ -927,7 +785,7 @@ function deleteAllStrokes() {
 }
 
 function updateUndoButton() {
-  undoButton.disabled = currentHistoryNode.parent === null;
+  undoButton.disabled = !history.canUndo;
 }
 
 function updateRangeValues() {
@@ -1164,14 +1022,13 @@ function setLibraryMode(mode) {
 
 function undoLastStroke() {
   settleReassemblyEffects();
-  if (!currentHistoryNode.parent) {
+  if (!history.canUndo) {
     return;
   }
 
   playTimeGauntletAnimation();
-  playEffectSound("./assets/bell-reverse.ogg");
-  const undoneNode = currentHistoryNode;
-  const targetNode = undoneNode.parent;
+  playReverseSound();
+  const { undoneNode, targetNode } = history.undo();
   if (undoneNode.kind === "delete") {
     stopDeleteSounds();
   }
@@ -1179,8 +1036,6 @@ function undoLastStroke() {
     (effect) => effect.historyId === undoneNode.id && effect.direction === "forward",
   );
   state.deleteEffects = state.deleteEffects.filter((effect) => effect.historyId !== undoneNode.id);
-  currentHistoryNode = targetNode;
-
   if (
     undoneNode.kind === "delete" &&
     undoneNode.deleteEffect &&
