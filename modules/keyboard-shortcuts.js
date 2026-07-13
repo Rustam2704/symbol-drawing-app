@@ -8,7 +8,7 @@ export function createKeyboardShortcutHandler({ onClear, onUndo }) {
     if (event.repeat || isEditableTarget(event.target)) return;
 
     const key = String(event.key || "");
-    if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === "z" && !event.shiftKey) {
+    if ((event.ctrlKey || event.metaKey) && event.code === "KeyZ" && !event.shiftKey) {
       event.preventDefault();
       onUndo();
       return;
