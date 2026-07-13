@@ -1,0 +1,52 @@
+{
+  "version": "1.2.0",
+  "private": true,
+  "name": "dev",
+  "description": "An example project for perfect-freehand.",
+  "author": {
+    "name": "Steve Ruiz",
+    "url": "https://twitter.com/steveruizok"
+  },
+  "repository": "https://github.com/steveruizok/perfect-freehand",
+  "keywords": [
+    "ink",
+    "draw",
+    "paint",
+    "signature",
+    "handwriting",
+    "text",
+    "drawing",
+    "painting"
+  ],
+  "license": "MIT",
+  "scripts": {
+    "start": "vite",
+    "build": "yarn clean && vite build",
+    "preview": "vite preview",
+    "clean": "rm -rf dist"
+  },
+  "files": [
+    "src"
+  ],
+  "devDependencies": {
+    "@radix-ui/react-checkbox": "^1.1.0",
+    "@radix-ui/react-icons": "^1.3.0",
+    "@radix-ui/react-label": "^2.1.0",
+    "@radix-ui/react-slider": "^1.2.0",
+    "@tldraw/core": "^0.1.19",
+    "@tldraw/intersect": "^0.1.3",
+    "@tldraw/vec": "^0.1.3",
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.0.10",
+    "@types/react-dom": "^18.0.5",
+    "@vitejs/plugin-react": "^4.3.0",
+    "perfect-freehand": "^1.2.0",
+    "react": "^18.1.0",
+    "react-dom": "^18.1.0",
+    "react-hotkeys-hook": "^3.4.0",
+    "rko": "^0.5.25",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "zustand": "^5.0.0"
+  }
+}

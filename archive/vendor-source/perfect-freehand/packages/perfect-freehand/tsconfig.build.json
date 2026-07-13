@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "exclude": [
+    "node_modules",
+    "**/*.test.tsx",
+    "**/*.test.ts",
+    "**/*.spec.tsx",
+    "**/*.spec.ts",
+    "src/test",
+    "dist"
+  ],
+  "compilerOptions": {
+    "composite": false,
+    "incremental": false,
+    "declarationMap": true,
+    "sourceMap": true,
+    "emitDeclarationOnly": true,
+    "stripInternal": true
+  }
+}

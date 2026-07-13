@@ -1,0 +1,10 @@
+Generated practice images.
+
+Stroke/path source:
+- hanzi-writer-data / Make Me A Hanzi data
+- https://github.com/chanind/hanzi-writer-data
+- License: Arphic Public License, as documented by Hanzi Writer.
+
+Rendering:
+- Local generated PNG files.
+- Duolingo screenshots/assets were not copied.
