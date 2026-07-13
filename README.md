@@ -30,6 +30,5 @@ The command runs the JavaScript unit tests and Python server tests. Browser-leve
 - `server.py` — HTTP routes and file-dialog integration.
 - `server_library.py` — validated filesystem and image-data helpers.
 - `tests/` — JavaScript and Python unit tests.
-- `archive/` — files retained for manual review but not used by the running app.
 
 Static HTML, CSS, and JavaScript are served with revalidation enabled so module changes cannot be mixed with stale browser cache entries.
