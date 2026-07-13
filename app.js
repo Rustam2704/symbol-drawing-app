@@ -40,7 +40,7 @@ import { createLibraryApi } from "./modules/library-api.js";
 import { createLibraryRenderer } from "./modules/library-renderer.js";
 import { createMediaLoader } from "./modules/media-loader.js";
 import { createImageCropService } from "./modules/image-crop-service.js";
-import { createKeyboardShortcutHandler } from "./modules/keyboard-shortcuts.js";
+import { createKeyboardShortcutHandler } from "./modules/keyboard-shortcuts.js?v=layout-independent-undo";
 import { createPdfService } from "./modules/pdf-service.js";
 import { createRequestGate } from "./modules/request-gate.js";
 import { createSpriteAnimation } from "./modules/sprite-animation.js";
