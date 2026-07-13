@@ -80,6 +80,7 @@ class ServerLibraryTests(unittest.TestCase):
             self.assertEqual(output, image)
             self.assertEqual(output.read_bytes(), b"cropped")
             self.assertEqual(archived.read_bytes(), b"original")
+            self.assertEqual(archived.parent.name, "crop-originals-signs-app")
             self.assertEqual(list(folder.glob(".*.tmp")), [])
 
     def test_crop_save_changes_jpeg_to_png_after_successful_write(self):

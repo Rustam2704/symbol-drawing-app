@@ -19,8 +19,11 @@ import {
   previewSquareToImageCrop,
 } from "./modules/crop-geometry.js";
 import { renderAreaCropPreview, renderFileCropPreview } from "./modules/crop-preview-renderer.js";
-import { createDeleteMotionMap, packDeleteParticles } from "./modules/delete-particles.js";
 import { createDeleteEffectController } from "./modules/delete-effect-controller.js";
+import {
+  createDeleteParticleData,
+  createDeleteTrajectoryRenderer,
+} from "./modules/delete-trajectory-renderer.js";
 import { createFrameScheduler } from "./modules/frame-scheduler.js";
 import { cloneStrokes, createHistory } from "./modules/history.js";
 import {
@@ -45,18 +48,23 @@ import { calculateRangePercent, getErrorMessage, normalizeColor, shortenMiddle }
 
 const {
   appShell,
+  backgroundCanvas,
   canvas,
+  deleteEffectCanvas,
   clearButton,
   gauntletCanvas,
   undoButton,
   timeGauntletCanvas,
   swapMenuButton,
+  personalThemeButton,
   currentThemeButton,
   darkThemeButton,
   violetThemeButton,
   sunsetThemeButton,
   chooseFileButton,
   penSizeInput,
+  penRangeControl,
+  penThumbPreview,
   backgroundOpacityInput,
   backgroundScaleInput,
   penSizeValue,
@@ -87,14 +95,20 @@ const {
   sortByDateButton,
   sortByNameButton,
   colorSwatches,
+  personalThemeButtons,
   colorPickerButton,
-  colorPickerInput,
+  colorPickerPanel,
+  colorPickerField,
+  colorPickerFieldThumb,
+  colorPickerHue,
+  colorPickerPreview,
+  colorPickerHex,
   rangeInputs,
 } = queryAppElements(document);
+const backgroundContext = backgroundCanvas.getContext("2d");
 const context = canvas.getContext("2d");
 const cropContext = cropCanvas.getContext("2d");
 const fileCropContext = fileCropCanvas.getContext("2d");
-
 function reportError(error) {
   window.alert(getErrorMessage(error));
 }
@@ -136,6 +150,19 @@ const {
 
 const settings = createSettingsStore();
 
+const RANGE_POSITION_MAX = 1000;
+const colorPickerState = { hue: 0, saturation: 0, value: 0, pendingColor: "#1f1d1a", target: "pen", themeKey: null };
+const UI_THEME_PALETTES = Object.freeze({
+  current: { paper: "#fbfaf7", panel: "#ffffff", ink: "#202124", line: "#d8d2c8", accent: "#237c6b", accentStrong: "#155e50", danger: "#b3342d" },
+  dark: { paper: "#070707", panel: "#1a1a1a", ink: "#808080", line: "#4d4d4d", accent: "#4d4d4d", accentStrong: "#808080", danger: "#1a1a1a" },
+  violet: { paper: "#07052f", panel: "#211052", ink: "#b8f4f2", line: "#44206c", accent: "#922b91", accentStrong: "#10c0e0", danger: "#641d68" },
+  sunset: { paper: "#062c3c", panel: "#0a4457", ink: "#d7f3ee", line: "#126c83", accent: "#f48470", accentStrong: "#ffe0aa", danger: "#bd5e62" },
+});
+
+function exponentialRangeValue(position, centerValue) {
+  return centerValue * (10 ** ((Number(position) / (RANGE_POSITION_MAX / 2)) - 1));
+}
+
 const state = {
   drawing: false,
   panning: false,
@@ -149,13 +176,13 @@ const state = {
   pdfPage: 1,
   pdfPageCount: 0,
   backgroundTransparency: Number(backgroundOpacityInput.value),
-  backgroundScale: Number(backgroundScaleInput.value),
+  backgroundScale: exponentialRangeValue(backgroundScaleInput.value, 1),
   showGrid: true,
   showBackground: true,
-  penSize: Number(penSizeInput.value),
+  penSize: exponentialRangeValue(penSizeInput.value, 10),
   backgroundOffsetX: 0,
   backgroundOffsetY: 0,
-  toolMode: "pointer",
+  toolMode: "pressure",
   libraryItems: [],
   librarySort: "date",
   libraryMode: "folder",
@@ -167,6 +194,8 @@ const state = {
   penColor: "#1f1d1a",
   recentColors: ["#1f1d1a", "#237c6b", "#b3342d"],
   theme: settings.readTheme(),
+  themeBase: "current",
+  personalThemePalette: null,
   menusSwapped: settings.readBoolean("symbolPracticeMenusSwapped"),
 };
 
@@ -203,25 +232,27 @@ function getPdfLibrary() {
 }
 
 function fitCanvasToContainer() {
+  const workspace = canvas.parentElement;
+  const displayWidth = Math.max(1, workspace.clientWidth);
+  const displayHeight = Math.max(1, workspace.clientHeight);
+  const displaySide = Math.max(displayWidth, displayHeight);
+  for (const target of [backgroundCanvas, canvas]) {
+    target.style.width = `${displaySide}px`;
+    target.style.height = `${displaySide}px`;
+  }
+  const effectSide = displaySide;
+  deleteEffectCanvas.style.width = `${effectSide}px`;
+  deleteEffectCanvas.style.height = `${effectSide}px`;
+  deleteTrajectoryRenderer.resize(
+    effectSide,
+    effectSide,
+    window.devicePixelRatio || 1,
+  );
+}
+
+function getCanvasScale() {
   const rect = canvas.getBoundingClientRect();
-  const ratio = window.devicePixelRatio || 1;
-  const width = Math.max(1, Math.floor(rect.width * ratio));
-  const height = Math.max(1, Math.floor(rect.height * ratio));
-
-  if (canvas.width === width && canvas.height === height) {
-    return;
-  }
-
-  canvas.width = width;
-  canvas.height = height;
-  deleteMotionMap = null;
-  drawScene();
-  const prepareMotionMap = () => getDeleteMotionMap();
-  if ("requestIdleCallback" in window) {
-    window.requestIdleCallback(prepareMotionMap, { timeout: 500 });
-  } else {
-    window.setTimeout(prepareMotionMap, 0);
-  }
+  return canvas.width / Math.max(1, rect.width);
 }
 
 function getPoint(event) {
@@ -234,18 +265,73 @@ function getPoint(event) {
     x: (event.clientX - rect.left) * ratioX,
     y: (event.clientY - rect.top) * ratioY,
     pressure,
-    size: state.penSize * (0.7 + pressure * 0.45) * (window.devicePixelRatio || 1),
+    size: state.penSize * (0.7 + pressure * 0.45) * getCanvasScale(),
   };
 }
 
-function clearCanvas() {
+function clearStrokeLayer() {
   context.clearRect(0, 0, canvas.width, canvas.height);
 }
 
+function clearBackgroundLayer() {
+  backgroundContext.clearRect(0, 0, backgroundCanvas.width, backgroundCanvas.height);
+}
+
+function hexWithAlpha(hex, alpha) {
+  const red = parseInt(hex.slice(1, 3), 16);
+  const green = parseInt(hex.slice(3, 5), 16);
+  const blue = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
+
+function getActiveThemePalette() {
+  return state.personalThemePalette || UI_THEME_PALETTES[state.theme] || UI_THEME_PALETTES.current;
+}
+
+function updatePersonalThemeButtons() {
+  const palette = getActiveThemePalette();
+  personalThemeButtons.forEach((button) => {
+    const key = button.dataset.themeColor;
+    button.style.background = palette[key];
+    button.classList.toggle(
+      "active",
+      !colorPickerPanel.hidden && colorPickerState.target === "theme" && colorPickerState.themeKey === key,
+    );
+  });
+  const storedPersonalTheme = settings.readPersonalTheme();
+  const previewPalette = state.theme === "personal"
+    ? palette
+    : storedPersonalTheme?.palette || UI_THEME_PALETTES.current;
+  const previewKeys = ["paper", "panel", "accent", "accentStrong"];
+  Array.from(personalThemeButton.children).forEach((swatch, index) => {
+    swatch.style.background = previewPalette[previewKeys[index]];
+  });
+}
+
+function applyPersonalThemePalette() {
+  const palette = getActiveThemePalette();
+  const rootStyle = document.documentElement.style;
+  rootStyle.setProperty("--paper", palette.paper);
+  rootStyle.setProperty("--panel", palette.panel);
+  rootStyle.setProperty("--ink", palette.ink);
+  rootStyle.setProperty("--line", palette.line);
+  rootStyle.setProperty("--accent", palette.accent);
+  rootStyle.setProperty("--accent-strong", palette.accentStrong);
+  rootStyle.setProperty("--danger", palette.danger);
+  rootStyle.setProperty("--theme-surface", `color-mix(in srgb, ${palette.panel} 94%, transparent)`);
+  rootStyle.setProperty("--theme-soft", palette.panel);
+  rootStyle.setProperty("--theme-border", palette.line);
+  rootStyle.setProperty(
+    "--theme-body-background",
+    `radial-gradient(circle at 50% 10%, color-mix(in srgb, ${palette.accentStrong} 28%, transparent), transparent 28%), linear-gradient(150deg, ${palette.paper} 0%, ${palette.panel} 58%, ${palette.line} 100%)`,
+  );
+  rootStyle.setProperty("--shadow", `0 18px 45px color-mix(in srgb, ${palette.ink} 28%, transparent)`);
+  updatePersonalThemeButtons();
+}
+
 function drawPaper() {
-  const themeColors = THEME_COLORS[state.theme];
-  context.fillStyle = themeColors.paper;
-  context.fillRect(0, 0, canvas.width, canvas.height);
+  backgroundContext.fillStyle = getActiveThemePalette().paper;
+  backgroundContext.fillRect(0, 0, backgroundCanvas.width, backgroundCanvas.height);
 }
 
 function drawGrid() {
@@ -253,44 +339,44 @@ function drawGrid() {
     return;
   }
 
-  const themeColors = THEME_COLORS[state.theme];
+  const palette = getActiveThemePalette();
   const shortSide = Math.min(canvas.width, canvas.height);
   const step = Math.max(36, Math.floor(shortSide / 8));
   const centerX = canvas.width / 2;
   const centerY = canvas.height / 2;
 
-  context.save();
-  context.strokeStyle = themeColors.grid;
-  context.lineWidth = 1;
-  context.beginPath();
+  backgroundContext.save();
+  backgroundContext.strokeStyle = hexWithAlpha(palette.line, 0.32);
+  backgroundContext.lineWidth = 1;
+  backgroundContext.beginPath();
 
   for (let x = centerX % step; x < canvas.width; x += step) {
-    context.moveTo(x, 0);
-    context.lineTo(x, canvas.height);
+    backgroundContext.moveTo(x, 0);
+    backgroundContext.lineTo(x, canvas.height);
   }
 
   for (let y = centerY % step; y < canvas.height; y += step) {
-    context.moveTo(0, y);
-    context.lineTo(canvas.width, y);
+    backgroundContext.moveTo(0, y);
+    backgroundContext.lineTo(canvas.width, y);
   }
-  context.stroke();
+  backgroundContext.stroke();
 
-  context.strokeStyle = themeColors.guide;
-  context.beginPath();
-  context.moveTo(centerX, 0);
-  context.lineTo(centerX, canvas.height);
-  context.moveTo(0, centerY);
-  context.lineTo(canvas.width, centerY);
-  context.stroke();
+  backgroundContext.strokeStyle = hexWithAlpha(palette.accentStrong, 0.42);
+  backgroundContext.beginPath();
+  backgroundContext.moveTo(centerX, 0);
+  backgroundContext.lineTo(centerX, canvas.height);
+  backgroundContext.moveTo(0, centerY);
+  backgroundContext.lineTo(canvas.width, centerY);
+  backgroundContext.stroke();
 
-  context.strokeStyle = themeColors.margin;
-  context.beginPath();
-  context.moveTo(0, 0);
-  context.lineTo(canvas.width, canvas.height);
-  context.moveTo(canvas.width, 0);
-  context.lineTo(0, canvas.height);
-  context.stroke();
-  context.restore();
+  backgroundContext.strokeStyle = hexWithAlpha(palette.danger, 0.42);
+  backgroundContext.beginPath();
+  backgroundContext.moveTo(0, 0);
+  backgroundContext.lineTo(canvas.width, canvas.height);
+  backgroundContext.moveTo(canvas.width, 0);
+  backgroundContext.lineTo(0, canvas.height);
+  backgroundContext.stroke();
+  backgroundContext.restore();
 }
 
 function drawBackgroundImage() {
@@ -306,10 +392,10 @@ function drawBackgroundImage() {
   const x = (canvas.width - width) / 2 + state.backgroundOffsetX;
   const y = (canvas.height - height) / 2 + state.backgroundOffsetY;
 
-  context.save();
-  context.globalAlpha = 1 - state.backgroundTransparency;
-  context.drawImage(image, crop.x, crop.y, crop.width, crop.height, x, y, width, height);
-  context.restore();
+  backgroundContext.save();
+  backgroundContext.globalAlpha = 1 - state.backgroundTransparency;
+  backgroundContext.drawImage(image, crop.x, crop.y, crop.width, crop.height, x, y, width, height);
+  backgroundContext.restore();
 }
 
 function drawStroke(stroke) {
@@ -333,7 +419,7 @@ function drawFreehandStroke(stroke) {
     return;
   }
 
-  const baseSize = Math.max(1, stroke.size || state.penSize * (window.devicePixelRatio || 1));
+  const baseSize = Math.max(1, stroke.size || state.penSize * getCanvasScale());
   const options = getFreehandOptions(stroke.type, baseSize);
   const inputPoints = stroke.points.map((point) => [point.x, point.y, point.pressure || 0.5]);
   const outline = getStroke(inputPoints, options);
@@ -413,101 +499,90 @@ function drawStrokes() {
   state.strokes.forEach(drawStroke);
 }
 
-function drawScene() {
-  clearCanvas();
+function drawBackgroundLayer() {
+  clearBackgroundLayer();
   drawPaper();
   drawBackgroundImage();
   drawGrid();
+}
+
+function drawStrokeLayer() {
+  clearStrokeLayer();
   drawStrokes();
 }
 
-const sceneDrawScheduler = createFrameScheduler(drawScene);
-const scheduleSceneDraw = sceneDrawScheduler.schedule;
+const backgroundDrawScheduler = createFrameScheduler(drawBackgroundLayer);
+const scheduleBackgroundDraw = backgroundDrawScheduler.schedule;
 
-let deleteMotionMap = null;
-const deleteMaskCanvas = document.createElement("canvas");
-const deleteMaskContext = deleteMaskCanvas.getContext("2d", { willReadFrequently: true });
-
-function getDeleteMotionMap() {
-  const pixelRatio = window.devicePixelRatio || 1;
-  const particleSize = Math.max(2, Math.round(pixelRatio * 1.35));
-  const key = `${canvas.width}x${canvas.height}:${particleSize}`;
-  if (deleteMotionMap?.key === key) {
-    return deleteMotionMap;
+function getDeleteBounds(strokes) {
+  let minX = canvas.width;
+  let minY = canvas.height;
+  let maxX = 0;
+  let maxY = 0;
+  let hasPoints = false;
+  for (const stroke of strokes) {
+    let strokeWidth = Math.max(1, stroke.size || 0);
+    for (const point of stroke.points) strokeWidth = Math.max(strokeWidth, point.size || 0);
+    const padding = strokeWidth / 2 + 2;
+    for (const point of stroke.points) {
+      hasPoints = true;
+      minX = Math.min(minX, point.x - padding);
+      minY = Math.min(minY, point.y - padding);
+      maxX = Math.max(maxX, point.x + padding);
+      maxY = Math.max(maxY, point.y + padding);
+    }
   }
-  deleteMotionMap = createDeleteMotionMap({ width: canvas.width, height: canvas.height, pixelRatio });
-  return deleteMotionMap;
+  if (!hasPoints) return null;
+  const x = Math.max(0, Math.floor(minX));
+  const y = Math.max(0, Math.floor(minY));
+  const right = Math.min(canvas.width, Math.ceil(maxX));
+  const bottom = Math.min(canvas.height, Math.ceil(maxY));
+  if (right <= x || bottom <= y) return null;
+  return { x, y, width: right - x, height: bottom - y };
 }
 
-function drawStrokeMask(maskContext, stroke, particleSize) {
-  const scale = 1 / particleSize;
-  maskContext.save();
-  maskContext.fillStyle = stroke.color;
-  maskContext.strokeStyle = stroke.color;
-
-  if (stroke.type === "freehand" || stroke.type === "brush" || stroke.type === "pressure") {
-    const baseSize = Math.max(1, stroke.size || state.penSize * (window.devicePixelRatio || 1));
-    const outline = getStroke(
-      stroke.points.map((point) => [point.x, point.y, point.pressure || 0.5]),
-      getFreehandOptions(stroke.type, baseSize),
-    );
-    maskContext.beginPath();
-    outline.forEach(([x, y], index) => {
-      if (index === 0) maskContext.moveTo(x * scale, y * scale);
-      else maskContext.lineTo(x * scale, y * scale);
-    });
-    maskContext.closePath();
-    maskContext.fill();
-  } else if (stroke.points.length === 1) {
-    const point = stroke.points[0];
-    maskContext.beginPath();
-    maskContext.arc(point.x * scale, point.y * scale, point.size * scale / 2, 0, Math.PI * 2);
-    maskContext.fill();
-  } else {
-    maskContext.lineCap = "round";
-    maskContext.lineJoin = "round";
-    maskContext.beginPath();
-    stroke.points.forEach((point, index) => {
-      if (index === 0) maskContext.moveTo(point.x * scale, point.y * scale);
-      else maskContext.lineTo(point.x * scale, point.y * scale);
-    });
-    maskContext.lineWidth = Math.max(...stroke.points.map((point) => point.size)) * scale;
-    maskContext.stroke();
-  }
-  maskContext.restore();
+function createDeleteParticles(strokes, seed) {
+  const bounds = getDeleteBounds(strokes);
+  if (!bounds) return null;
+  const pixels = context.getImageData(bounds.x, bounds.y, bounds.width, bounds.height);
+  return createDeleteParticleData(pixels, bounds.x, bounds.y, seed);
 }
 
-function createDeleteParticles(strokes) {
-  const motionMap = getDeleteMotionMap();
-  if (deleteMaskCanvas.width !== motionMap.columns || deleteMaskCanvas.height !== motionMap.rows) {
-    deleteMaskCanvas.width = motionMap.columns;
-    deleteMaskCanvas.height = motionMap.rows;
-  } else {
-    deleteMaskContext.clearRect(0, 0, deleteMaskCanvas.width, deleteMaskCanvas.height);
-  }
-  strokes.forEach((stroke) => drawStrokeMask(deleteMaskContext, stroke, motionMap.particleSize));
-  const rgba = deleteMaskContext.getImageData(
-    0,
-    0,
-    deleteMaskCanvas.width,
-    deleteMaskCanvas.height,
-  ).data;
-  return packDeleteParticles(rgba, motionMap);
+const deleteTrajectoryRenderer = createDeleteTrajectoryRenderer({
+  canvas: deleteEffectCanvas,
+  assetUrl: "./assets/delete-trajectories-1000x1000-1000-js-wave-shift-010s.dtv",
+  mapUrl: "./assets/delete-particle-map-1000x1000-1000-wave-shift-010s.dpm",
+});
+deleteTrajectoryRenderer.ready.catch(reportError);
+let layoutUpdatePending = false;
+
+function flushPendingLayoutUpdate() {
+  if (!layoutUpdatePending) return;
+  layoutUpdatePending = false;
+  layoutResizeScheduler.schedule();
 }
 
 const deleteEffects = createDeleteEffectController({
-  context,
   cloneStrokes,
-  drawScene,
+  drawStrokes: drawStrokeLayer,
   getCurrentHistoryNode: () => history.current,
-  getPixelRatio: () => window.devicePixelRatio || 1,
+  onFinish: flushPendingLayoutUpdate,
+  renderer: deleteTrajectoryRenderer,
+  effectType: "1000",
   setStrokes: (strokes) => {
     state.strokes = strokes;
   },
 });
 
 function deleteAllStrokes() {
-  deleteEffects.settleReassembly();
+  if (deleteEffects.canRestartDelete(history.current.id)) {
+    playPreparedDeleteSound();
+    gauntletAnimation.play();
+    const deleteHistoryNode = recordHistory("delete");
+    deleteEffects.restartDelete(deleteHistoryNode.parent.id, deleteHistoryNode);
+    updateUndoButton();
+    return;
+  }
   if (!state.strokes.length) {
     return;
   }
@@ -522,20 +597,20 @@ function deleteAllStrokes() {
     recordHistory("draw");
   }
 
-  // Redraw without active dust before capturing the vector strokes for this deletion.
-  drawScene();
   const deletedStrokes = cloneStrokes(state.strokes);
   state.strokes = [];
   const deleteHistoryNode = recordHistory("delete");
-  drawScene();
 
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    drawStrokeLayer();
     updateUndoButton();
     return;
   }
 
+  const particles = createDeleteParticles(deletedStrokes, deleteHistoryNode.id);
+  drawStrokeLayer();
   updateUndoButton();
-  deleteEffects.start(deleteHistoryNode, createDeleteParticles(deletedStrokes));
+  deleteEffects.start(deleteHistoryNode, particles);
 }
 
 function updateUndoButton() {
@@ -546,6 +621,86 @@ function updateRangeValues() {
   penSizeValue.textContent = `${state.penSize.toFixed(1)} px`;
   backgroundOpacityValue.textContent = `${(state.backgroundTransparency * 100).toFixed(1)}%`;
   backgroundScaleValue.textContent = `${state.backgroundScale.toFixed(1)}x`;
+}
+
+function updatePenThumbPreview() {
+  const progress = calculateRangePercent(penSizeInput);
+  penThumbPreview.style.left = `${progress}%`;
+  penThumbPreview.style.setProperty("--pen-preview-size", `${state.penSize}px`);
+  penThumbPreview.style.setProperty("--pen-preview-color", state.penColor);
+}
+
+function hexToHsv(hex) {
+  const value = normalizeColor(hex).slice(1);
+  const red = parseInt(value.slice(0, 2), 16) / 255;
+  const green = parseInt(value.slice(2, 4), 16) / 255;
+  const blue = parseInt(value.slice(4, 6), 16) / 255;
+  const maximum = Math.max(red, green, blue);
+  const minimum = Math.min(red, green, blue);
+  const delta = maximum - minimum;
+  let hue = 0;
+  if (delta) {
+    if (maximum === red) hue = 60 * (((green - blue) / delta) % 6);
+    else if (maximum === green) hue = 60 * (((blue - red) / delta) + 2);
+    else hue = 60 * (((red - green) / delta) + 4);
+  }
+  return {
+    hue: (hue + 360) % 360,
+    saturation: maximum ? delta / maximum : 0,
+    value: maximum,
+  };
+}
+
+function hsvToHex(hue, saturation, value) {
+  const chroma = value * saturation;
+  const segment = ((hue % 360) + 360) % 360 / 60;
+  const secondary = chroma * (1 - Math.abs((segment % 2) - 1));
+  const pairs = [[chroma, secondary, 0], [secondary, chroma, 0], [0, chroma, secondary], [0, secondary, chroma], [secondary, 0, chroma], [chroma, 0, secondary]];
+  const [red, green, blue] = pairs[Math.floor(segment) % 6];
+  const match = value - chroma;
+  return `#${[red, green, blue].map((channel) => Math.round((channel + match) * 255).toString(16).padStart(2, "0")).join("")}`;
+}
+
+function updateColorPickerVisuals() {
+  const { hue, saturation, value } = colorPickerState;
+  const color = hsvToHex(hue, saturation, value);
+  colorPickerState.pendingColor = color;
+  colorPickerField.style.setProperty("--picker-hue", `hsl(${hue} 100% 50%)`);
+  colorPickerFieldThumb.style.left = `${saturation * 100}%`;
+  colorPickerFieldThumb.style.top = `${(1 - value) * 100}%`;
+  colorPickerFieldThumb.style.background = color;
+  colorPickerHue.value = String(Math.round(hue));
+  colorPickerPreview.style.background = color;
+  colorPickerHex.value = color;
+}
+
+function openColorPicker(color = state.penColor, target = "pen", themeKey = null) {
+  Object.assign(colorPickerState, hexToHsv(color), { target, themeKey });
+  colorPickerPanel.hidden = false;
+  colorPickerButton.setAttribute("aria-expanded", "true");
+  updateColorPickerVisuals();
+  updatePersonalThemeButtons();
+}
+
+function closeColorPicker({ apply = true } = {}) {
+  if (colorPickerPanel.hidden) return;
+  if (apply && colorPickerState.target === "theme" && colorPickerState.themeKey) {
+    const baseTheme = state.theme === "personal" ? state.themeBase : state.theme;
+    const sourcePalette = state.theme === "personal"
+      ? getActiveThemePalette()
+      : UI_THEME_PALETTES[baseTheme];
+    const nextPersonalPalette = {
+      ...sourcePalette,
+      [colorPickerState.themeKey]: colorPickerState.pendingColor,
+    };
+    settings.writePersonalTheme(baseTheme, nextPersonalPalette);
+    setTheme("personal", { updatePen: false });
+  } else if (apply) {
+    setPenColor(colorPickerState.pendingColor);
+  }
+  colorPickerPanel.hidden = true;
+  colorPickerButton.setAttribute("aria-expanded", "false");
+  updatePersonalThemeButtons();
 }
 
 function updateRangeFill(input) {
@@ -559,7 +714,7 @@ function updateColorPalette() {
     button.classList.toggle("active", color === state.penColor);
     button.setAttribute("aria-label", `Use ${color}`);
   });
-  colorPickerInput.value = state.penColor;
+  updatePenThumbPreview();
 }
 
 function setPenColor(color) {
@@ -589,9 +744,23 @@ function updateMenuSwap() {
 }
 
 function setTheme(theme, { updatePen = true } = {}) {
-  state.theme = THEME_COLORS[theme] ? theme : "current";
-  document.documentElement.dataset.theme = state.theme;
-  [[currentThemeButton, "current"], [darkThemeButton, "dark"], [violetThemeButton, "violet"], [sunsetThemeButton, "sunset"]]
+  if (theme === "personal") {
+    let personalTheme = settings.readPersonalTheme();
+    if (!personalTheme) {
+      const baseTheme = Object.hasOwn(THEME_COLORS, state.theme) ? state.theme : "current";
+      personalTheme = { baseTheme, palette: { ...UI_THEME_PALETTES[baseTheme] } };
+      settings.writePersonalTheme(personalTheme.baseTheme, personalTheme.palette);
+    }
+    state.theme = "personal";
+    state.themeBase = personalTheme.baseTheme;
+    state.personalThemePalette = { ...personalTheme.palette };
+  } else {
+    state.theme = Object.hasOwn(THEME_COLORS, theme) ? theme : "current";
+    state.themeBase = state.theme;
+    state.personalThemePalette = { ...UI_THEME_PALETTES[state.theme] };
+  }
+  document.documentElement.dataset.theme = state.themeBase;
+  [[personalThemeButton, "personal"], [currentThemeButton, "current"], [darkThemeButton, "dark"], [violetThemeButton, "violet"], [sunsetThemeButton, "sunset"]]
     .forEach(([button, buttonTheme]) => {
       const isActive = state.theme === buttonTheme;
       button.classList.toggle("active", isActive);
@@ -599,13 +768,14 @@ function setTheme(theme, { updatePen = true } = {}) {
     });
 
   settings.writeTheme(state.theme);
+  applyPersonalThemePalette();
 
   if (updatePen) {
-    const colors = THEME_COLORS[state.theme].pens;
+    const colors = THEME_COLORS[state.themeBase].pens;
     state.recentColors = colors;
     setPenColor(colors[0]);
   }
-  drawScene();
+  drawBackgroundLayer();
 }
 
 function setToolMode(mode) {
@@ -690,15 +860,12 @@ function undoLastStroke() {
   if (undoneNode.kind === "delete") {
     stopDeleteSounds();
   }
-  const effectHandled = deleteEffects.undo(
-    undoneNode,
-    targetNode,
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-  );
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const effectHandled = deleteEffects.undo(undoneNode, targetNode, reducedMotion);
   if (!effectHandled) {
     state.strokes = cloneStrokes(targetNode.strokes);
   }
-  drawScene();
+  drawStrokeLayer();
   updateUndoButton();
 }
 
@@ -720,12 +887,12 @@ function startDrawing(event) {
   state.activeStroke = {
     type: state.toolMode === "brush" ? "brush" : state.toolMode === "pressure" ? "pressure" : "freehand",
     color: state.penColor,
-    size: state.penSize * (window.devicePixelRatio || 1),
+    size: state.penSize * getCanvasScale(),
     points: [point],
   };
   state.strokes.push(state.activeStroke);
   if (state.activeStroke.type !== "pen") {
-    drawScene();
+    drawStrokeLayer();
   } else {
     drawDot(point, state.activeStroke.color);
   }
@@ -739,7 +906,7 @@ function continueDrawing(event) {
     state.backgroundOffsetX += point.x - state.lastPanPoint.x;
     state.backgroundOffsetY += point.y - state.lastPanPoint.y;
     state.lastPanPoint = point;
-    scheduleSceneDraw();
+    scheduleBackgroundDraw();
     return;
   }
 
@@ -753,7 +920,7 @@ function continueDrawing(event) {
   state.activeStroke.points.push(point);
   state.lastPoint = point;
   if (state.activeStroke.type !== "pen") {
-    drawScene();
+    drawStrokeLayer();
   } else {
     drawSegment(prev, point, state.activeStroke.color);
   }
@@ -928,7 +1095,7 @@ function applyLoadedBackground(image) {
   updateToggleButtons();
   cropButton.disabled = false;
   updateFileCropButton();
-  drawScene();
+  drawBackgroundLayer();
 }
 
 async function loadLibraryItem(item) {
@@ -998,7 +1165,7 @@ async function setPdfPage(pageNumber) {
     state.backgroundOffsetY = 0;
     cropButton.disabled = false;
     updateFileCropButton();
-    drawScene();
+    drawBackgroundLayer();
     renderPdfPages();
 
     if (cropDialog.open) {
@@ -1202,7 +1369,7 @@ async function saveFileCrop() {
     state.crop = null;
     fileCropState.selection = null;
     fileCropDialog.close();
-    drawScene();
+    drawBackgroundLayer();
     await loadLibrary();
   } catch (error) {
     reportError(error);
@@ -1310,9 +1477,10 @@ swapMenuButton.addEventListener("click", () => {
   state.menusSwapped = !state.menusSwapped;
   settings.writeBoolean("symbolPracticeMenusSwapped", state.menusSwapped);
   updateMenuSwap();
-  fitCanvasToContainer();
+  layoutResizeScheduler.schedule();
 });
 
+personalThemeButton.addEventListener("click", () => setTheme("personal"));
 currentThemeButton.addEventListener("click", () => setTheme("current"));
 darkThemeButton.addEventListener("click", () => setTheme("dark"));
 violetThemeButton.addEventListener("click", () => setTheme("violet"));
@@ -1323,6 +1491,17 @@ rangeInputs.forEach((input) => {
   updateRangeFill(input);
 });
 
+function setPenRangeAdjusting(adjusting) {
+  penRangeControl.classList.toggle("adjusting", adjusting);
+}
+
+penSizeInput.addEventListener("pointerdown", () => setPenRangeAdjusting(true));
+penSizeInput.addEventListener("keydown", () => setPenRangeAdjusting(true));
+penSizeInput.addEventListener("keyup", () => setPenRangeAdjusting(false));
+penSizeInput.addEventListener("blur", () => setPenRangeAdjusting(false));
+window.addEventListener("pointerup", () => setPenRangeAdjusting(false));
+window.addEventListener("pointercancel", () => setPenRangeAdjusting(false));
+
 colorSwatches.forEach((button) => {
   button.addEventListener("click", () => {
     const index = Number(button.dataset.colorIndex);
@@ -1331,11 +1510,55 @@ colorSwatches.forEach((button) => {
 });
 
 colorPickerButton.addEventListener("click", () => {
-  colorPickerInput.click();
+  if (colorPickerPanel.hidden) openColorPicker(state.penColor, "pen");
+  else closeColorPicker();
 });
 
-colorPickerInput.addEventListener("change", () => {
-  setPenColor(colorPickerInput.value);
+personalThemeButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    const key = button.dataset.themeColor;
+    if (!colorPickerPanel.hidden) closeColorPicker();
+    openColorPicker(getActiveThemePalette()[key], "theme", key);
+  });
+});
+
+function updateColorFromField(event) {
+  const rect = colorPickerField.getBoundingClientRect();
+  colorPickerState.saturation = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+  colorPickerState.value = 1 - Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+  updateColorPickerVisuals();
+}
+
+colorPickerField.addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+  colorPickerField.setPointerCapture(event.pointerId);
+  updateColorFromField(event);
+});
+colorPickerField.addEventListener("pointermove", (event) => {
+  if (colorPickerField.hasPointerCapture(event.pointerId)) updateColorFromField(event);
+});
+
+colorPickerHue.addEventListener("input", () => {
+  colorPickerState.hue = Number(colorPickerHue.value);
+  updateColorPickerVisuals();
+});
+
+colorPickerHex.addEventListener("input", () => {
+  const color = normalizeColor(colorPickerHex.value);
+  if (!/^#[0-9a-f]{6}$/.test(color)) return;
+  Object.assign(colorPickerState, hexToHsv(color));
+  updateColorPickerVisuals();
+});
+
+document.addEventListener("pointerdown", (event) => {
+  if (
+    !colorPickerPanel.hidden
+    && !colorPickerPanel.contains(event.target)
+    && !colorPickerButton.contains(event.target)
+    && !event.target.closest(".personal-theme-colors")
+  ) {
+    closeColorPicker();
+  }
 });
 
 chooseFileButton.addEventListener("click", chooseFileFromServer);
@@ -1385,32 +1608,33 @@ sortByNameButton.addEventListener("click", () => {
 });
 
 penSizeInput.addEventListener("input", () => {
-  state.penSize = Number(penSizeInput.value);
+  state.penSize = exponentialRangeValue(penSizeInput.value, 10);
   updateRangeValues();
+  updatePenThumbPreview();
 });
 
 backgroundOpacityInput.addEventListener("input", () => {
   state.backgroundTransparency = Number(backgroundOpacityInput.value);
   updateRangeValues();
-  scheduleSceneDraw();
+  scheduleBackgroundDraw();
 });
 
 backgroundScaleInput.addEventListener("input", () => {
-  state.backgroundScale = Number(backgroundScaleInput.value);
+  state.backgroundScale = exponentialRangeValue(backgroundScaleInput.value, 1);
   updateRangeValues();
-  scheduleSceneDraw();
+  scheduleBackgroundDraw();
 });
 
 gridToggle.addEventListener("click", () => {
   state.showGrid = !state.showGrid;
   updateToggleButtons();
-  drawScene();
+  drawBackgroundLayer();
 });
 
 backgroundToggle.addEventListener("click", () => {
   state.showBackground = !state.showBackground;
   updateToggleButtons();
-  drawScene();
+  drawBackgroundLayer();
 });
 
 pointerModeButton.addEventListener("click", () => setToolMode("pointer"));
@@ -1433,7 +1657,7 @@ resetCropButton.addEventListener("click", () => {
   state.crop = null;
   cropState.selection = null;
   drawCropPreview();
-  drawScene();
+  drawBackgroundLayer();
 });
 
 applyCropButton.addEventListener("click", () => {
@@ -1441,7 +1665,7 @@ applyCropButton.addEventListener("click", () => {
     state.crop = previewRectToImageCrop(cropState.selection, cropState.previewRect);
   }
   cropDialog.close();
-  drawScene();
+  drawBackgroundLayer();
 });
 
 cropCanvas.addEventListener("pointerdown", (event) => {
@@ -1540,6 +1764,11 @@ canvas.addEventListener("pointercancel", stopDrawing);
 canvas.addEventListener("lostpointercapture", stopDrawing);
 
 function updateLayoutAfterResize() {
+  if (deleteEffects.isActive()) {
+    layoutUpdatePending = true;
+    return;
+  }
+  layoutUpdatePending = false;
   fitCanvasToContainer();
   updateFolderPathDisplay();
   if (cropDialog.open) {
@@ -1571,7 +1800,7 @@ window.addEventListener(
     mediaLoadRequestGate.cancel();
     pdfPageRequestGate.cancel();
     pdfThumbnailQueue.clear();
-    sceneDrawScheduler.cancel();
+    backgroundDrawScheduler.cancel();
     layoutResizeScheduler.cancel();
     browserFiles.dispose();
     disposeAudioEffects();
@@ -1591,6 +1820,6 @@ updateUndoButton();
 updateRangeValues();
 updateColorPalette();
 updateToggleButtons();
-setToolMode("pointer");
+setToolMode("pressure");
 updateFileCropButton();
 loadLibrary();

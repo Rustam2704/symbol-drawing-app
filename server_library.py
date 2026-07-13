@@ -96,7 +96,7 @@ def save_cropped_image(folder, image_path, cropped_mime, cropped_bytes):
     if output_path != image_path and output_path.exists():
         raise ValueError(f"Cropped PNG already exists: {output_path.name}")
 
-    old_dir = folder / "old"
+    old_dir = folder / "crop-originals-signs-app"
     old_dir.mkdir(parents=True, exist_ok=True)
     archived_path = get_available_archive_path(old_dir, image_path.name)
     shutil.copy2(image_path, archived_path)

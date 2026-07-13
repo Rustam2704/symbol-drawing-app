@@ -22,7 +22,7 @@ The command runs the JavaScript unit tests and Python server tests. Browser-leve
 
 - `app.js` — application state, orchestration, drawing input, and top-level event wiring.
 - `modules/history.js` — bounded 20-action history with snapshot sharing.
-- `modules/delete-*` — delete-particle data and animation lifecycle.
+- `assets/delete-trajectories-1000x1000-1000-js-wave-shift-010s.dtv` stores all 61 ready frames for 1000 deterministic motions. `assets/delete-particle-map-1000x1000-1000-wave-shift-010s.dpm` stores one precomputed `uint16` for every pixel: lower 10 bits select the motion and upper 6 bits store the final wave/time-shift delay. The browser performs no randomization, noise, trajectory generation, or delay generation; it only compacts opaque pixels, decodes their stored values, selects the current recorded frame, and draws it.
 - `modules/crop-*`, `modules/auto-crop.js`, `modules/image-crop-service.js` — crop geometry, analysis, rendering, and encoding.
 - `modules/library-*`, `web/browser-files.js` — server/browser file access, sorting, request cancellation, and DOM rendering.
 - `modules/pdf-service.js`, `modules/media-loader.js` — image and PDF decoding.

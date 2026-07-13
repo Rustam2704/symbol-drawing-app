@@ -29,6 +29,25 @@ export const THEME_COLORS = Object.freeze({
   },
 });
 
+const PERSONAL_THEME_KEYS = ["paper", "panel", "ink", "line", "accent", "accentStrong", "danger"];
+
+function normalizePersonalPalette(value) {
+  if (!value || typeof value !== "object") return null;
+  const palette = {};
+  for (const key of PERSONAL_THEME_KEYS) {
+    const color = String(value[key] || "").toLowerCase();
+    if (!/^#[0-9a-f]{6}$/.test(color)) return null;
+    palette[key] = color;
+  }
+  return palette;
+}
+
+function normalizePersonalTheme(value) {
+  const baseTheme = Object.hasOwn(THEME_COLORS, value?.baseTheme) ? value.baseTheme : null;
+  const palette = normalizePersonalPalette(value?.palette);
+  return baseTheme && palette ? { baseTheme, palette } : null;
+}
+
 export function createSettingsStore(storage = globalThis.localStorage) {
   function read(key) {
     try {
@@ -55,10 +74,22 @@ export function createSettingsStore(storage = globalThis.localStorage) {
     },
     readTheme() {
       const theme = read("symbolPracticeTheme");
-      return Object.hasOwn(THEME_COLORS, theme) ? theme : "current";
+      return theme === "personal" || Object.hasOwn(THEME_COLORS, theme) ? theme : "dark";
     },
     writeTheme(theme) {
-      write("symbolPracticeTheme", Object.hasOwn(THEME_COLORS, theme) ? theme : "current");
+      write("symbolPracticeTheme", theme === "personal" || Object.hasOwn(THEME_COLORS, theme) ? theme : "dark");
+    },
+    readPersonalTheme() {
+      try {
+        return normalizePersonalTheme(JSON.parse(read("symbolPracticePersonalTheme") || "null"));
+      } catch {
+        return null;
+      }
+    },
+    writePersonalTheme(baseTheme, palette) {
+      const normalized = normalizePersonalTheme({ baseTheme, palette });
+      if (!normalized) return;
+      write("symbolPracticePersonalTheme", JSON.stringify(normalized));
     },
   };
 }

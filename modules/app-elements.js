@@ -1,17 +1,22 @@
 const selectors = {
   appShell: ".app-shell",
+  backgroundCanvas: "#sceneBackgroundCanvas",
   canvas: "#practiceCanvas",
+  deleteEffectCanvas: "#deleteEffectCanvas",
   clearButton: "#clearButton",
   gauntletCanvas: "#gauntletAnimation",
   undoButton: "#undoButton",
   timeGauntletCanvas: "#timeGauntletAnimation",
   swapMenuButton: "#swapMenuButton",
+  personalThemeButton: "#personalThemeButton",
   currentThemeButton: "#currentThemeButton",
   darkThemeButton: "#darkThemeButton",
   violetThemeButton: "#violetThemeButton",
   sunsetThemeButton: "#sunsetThemeButton",
   chooseFileButton: "#chooseFileButton",
   penSizeInput: "#penSize",
+  penRangeControl: "#penRangeControl",
+  penThumbPreview: "#penThumbPreview",
   backgroundOpacityInput: "#backgroundOpacity",
   backgroundScaleInput: "#backgroundScale",
   penSizeValue: "#penSizeValue",
@@ -42,7 +47,12 @@ const selectors = {
   sortByDateButton: "#sortByDateButton",
   sortByNameButton: "#sortByNameButton",
   colorPickerButton: "#colorPickerButton",
-  colorPickerInput: "#colorPickerInput",
+  colorPickerPanel: "#colorPickerPanel",
+  colorPickerField: "#colorPickerField",
+  colorPickerFieldThumb: "#colorPickerFieldThumb",
+  colorPickerHue: "#colorPickerHue",
+  colorPickerPreview: "#colorPickerPreview",
+  colorPickerHex: "#colorPickerHex",
 };
 
 export function queryAppElements(documentRef = document) {
@@ -56,8 +66,11 @@ export function queryAppElements(documentRef = document) {
   elements.colorSwatches = Array.from(
     documentRef.querySelectorAll(".color-swatch[data-color-index]"),
   );
+  elements.personalThemeButtons = Array.from(
+    documentRef.querySelectorAll(".personal-theme-colors [data-theme-color]"),
+  );
   elements.rangeInputs = Array.from(documentRef.querySelectorAll('input[type="range"]'));
-  if (!elements.colorSwatches.length || !elements.rangeInputs.length) {
+  if (!elements.colorSwatches.length || elements.personalThemeButtons.length !== 7 || !elements.rangeInputs.length) {
     throw new Error("Required application control groups were not found.");
   }
   return elements;

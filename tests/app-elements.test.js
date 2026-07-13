@@ -6,11 +6,14 @@ import { queryAppElements } from "../modules/app-elements.js";
 test("application DOM contract resolves required elements and groups", () => {
   const documentRef = {
     querySelector: (selector) => ({ selector }),
-    querySelectorAll: (selector) => [{ selector }],
+    querySelectorAll: (selector) => selector.includes("personal-theme-colors")
+      ? Array.from({ length: 7 }, () => ({ selector }))
+      : [{ selector }],
   };
   const elements = queryAppElements(documentRef);
   assert.equal(elements.canvas.selector, "#practiceCanvas");
   assert.equal(elements.colorSwatches.length, 1);
+  assert.equal(elements.personalThemeButtons.length, 7);
   assert.equal(elements.rangeInputs.length, 1);
 });
 

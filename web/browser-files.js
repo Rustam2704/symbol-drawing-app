@@ -98,7 +98,7 @@ export function createBrowserFiles({
       }
       const croppedBlob = await (await fetchImpl(dataUrl)).blob();
       const originalFile = await item.handle.getFile();
-      const oldDirectory = await directoryHandle.getDirectoryHandle("old", { create: true });
+      const oldDirectory = await directoryHandle.getDirectoryHandle("crop-originals-signs-app", { create: true });
       const archiveHandle = await oldDirectory.getFileHandle(item.name, { create: true });
       const archiveWriter = await archiveHandle.createWritable();
       await archiveWriter.write(originalFile);

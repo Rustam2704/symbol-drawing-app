@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Symbol Practice Pad</title>
     <link rel="icon" href="./favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=29" />
+    <link rel="stylesheet" href="./styles.css?v=35" />
   </head>
   <body>
     <main class="app-shell">
@@ -26,19 +26,41 @@
               <path d="M5 12h14" />
             </svg>
           </button>
-          <input class="color-picker-input" id="colorPickerInput" type="color" value="#1f1d1a" aria-label="Choose custom brush color" />
+          <div class="color-picker-panel" id="colorPickerPanel" role="dialog" aria-label="Brush color palette" hidden>
+            <div class="color-picker-field" id="colorPickerField" aria-label="Color saturation and brightness">
+              <span class="color-picker-field-thumb" id="colorPickerFieldThumb" aria-hidden="true"></span>
+            </div>
+            <input class="color-picker-hue" id="colorPickerHue" type="range" min="0" max="360" value="0" step="1" aria-label="Color hue" />
+            <div class="color-picker-footer">
+              <span class="color-picker-preview" id="colorPickerPreview" aria-hidden="true"></span>
+              <input class="color-picker-hex" id="colorPickerHex" type="text" value="#1f1d1a" maxlength="7" spellcheck="false" aria-label="Hex color" />
+            </div>
+            <p>Click outside to apply</p>
+          </div>
+        </div>
+        <div class="personal-theme-colors" role="group" aria-label="Personal theme colors">
+          <button type="button" data-theme-color="paper" aria-label="Change canvas color" title="Canvas"></button>
+          <button type="button" data-theme-color="panel" aria-label="Change panel color" title="Panels"></button>
+          <button type="button" data-theme-color="ink" aria-label="Change text color" title="Text"></button>
+          <button type="button" data-theme-color="line" aria-label="Change border color" title="Borders"></button>
+          <button type="button" data-theme-color="accent" aria-label="Change accent color" title="Accent"></button>
+          <button type="button" data-theme-color="accentStrong" aria-label="Change strong accent color" title="Strong accent"></button>
+          <button type="button" data-theme-color="danger" aria-label="Change secondary accent color" title="Secondary accent"></button>
         </div>
         <div class="theme-switcher" role="group" aria-label="Color theme">
-          <button class="theme-button theme-button-current active" id="currentThemeButton" type="button" aria-label="Current theme" aria-pressed="true" title="Current theme"></button>
-          <button class="theme-button theme-button-dark" id="darkThemeButton" type="button" aria-label="Dark theme" aria-pressed="false" title="Dark theme"></button>
-          <button class="theme-button theme-button-violet" id="violetThemeButton" type="button" aria-label="Violet night theme" aria-pressed="false" title="Violet night theme"></button>
-          <button class="theme-button theme-button-sunset" id="sunsetThemeButton" type="button" aria-label="Forest sunset theme" aria-pressed="false" title="Forest sunset theme"></button>
+          <button class="theme-button theme-button-personal" id="personalThemeButton" type="button" aria-label="Personal theme" aria-pressed="false" title="Personal theme"><span></span><span></span><span></span><span></span></button>
+          <button class="theme-button theme-button-current" id="currentThemeButton" type="button" aria-label="Current theme" aria-pressed="false" title="Current theme"><span></span><span></span><span></span><span></span></button>
+          <button class="theme-button theme-button-dark active" id="darkThemeButton" type="button" aria-label="Dark theme" aria-pressed="true" title="Dark theme"><span></span><span></span><span></span><span></span></button>
+          <button class="theme-button theme-button-violet" id="violetThemeButton" type="button" aria-label="Violet night theme" aria-pressed="false" title="Violet night theme"><span></span><span></span><span></span><span></span></button>
+          <button class="theme-button theme-button-sunset" id="sunsetThemeButton" type="button" aria-label="Forest sunset theme" aria-pressed="false" title="Forest sunset theme"><span></span><span></span><span></span><span></span></button>
         </div>
         <button class="swap-menu-button" id="swapMenuButton" type="button" aria-pressed="false">Swap Menu</button>
       </aside>
 
       <section class="workspace" aria-label="Practice canvas">
-        <canvas id="practiceCanvas"></canvas>
+        <canvas id="sceneBackgroundCanvas" width="1000" height="1000" aria-hidden="true"></canvas>
+        <canvas id="practiceCanvas" width="1000" height="1000"></canvas>
+        <canvas id="deleteEffectCanvas" width="1000" height="1000" aria-hidden="true"></canvas>
       </section>
 
       <aside class="settings-panel" aria-label="Practice settings">
@@ -49,7 +71,13 @@
 
         <div class="control-row">
           <label for="penSize">Pen <span id="penSizeValue"></span></label>
-          <input id="penSize" type="range" min="1" max="48" value="8" step="0.1" />
+          <div class="pen-range-control" id="penRangeControl">
+            <input id="penSize" type="range" min="0" max="1000" value="715.6818820794937" step="any" />
+            <span class="pen-thumb-preview" id="penThumbPreview" aria-hidden="true">
+              <span class="pen-thumb-dot"></span>
+              <span class="pen-thumb-ring"></span>
+            </span>
+          </div>
         </div>
 
         <div class="control-row inline-toggle-row">
@@ -65,11 +93,11 @@
 
         <div class="control-row">
           <label for="backgroundScale">Scale <span id="backgroundScaleValue"></span></label>
-          <input id="backgroundScale" type="range" min="0.1" max="6" value="0.86" step="0.01" />
+          <input id="backgroundScale" type="range" min="0" max="1000" value="500" step="1" />
         </div>
 
         <div class="draw-mode-group" role="group" aria-label="Drawing mode">
-            <button class="mode-button active" id="pointerModeButton" type="button" title="Pen" aria-label="Pen mode" aria-pressed="true">
+            <button class="mode-button" id="pointerModeButton" type="button" title="Pen" aria-label="Pen mode" aria-pressed="false">
               <svg class="pointer-mode-icon" aria-hidden="true" viewBox="0 0 24 24">
                 <path d="M4.6121 4.6121 21.1121 12.1121 14.6121 14.6121l-2.5 6.5Z" />
               </svg>
@@ -80,7 +108,7 @@
             <button class="mode-button" id="brushModeButton" type="button" title="Brush" aria-label="Brush mode" aria-pressed="false">
               <span class="calligraphy-brush-icon" aria-hidden="true"></span>
             </button>
-            <button class="mode-button" id="pressureModeButton" type="button" title="Pressure pen" aria-label="Pressure pen mode" aria-pressed="false">
+            <button class="mode-button active" id="pressureModeButton" type="button" title="Pressure pen" aria-label="Pressure pen mode" aria-pressed="true">
               <span class="pressure-pen-icon" aria-hidden="true"></span>
             </button>
         </div>
